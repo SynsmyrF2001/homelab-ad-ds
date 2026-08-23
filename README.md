@@ -89,6 +89,7 @@ users, groups, and Group Policy.
 - [x] OU structure created: `IT` (with `Admins` and `Helpdesk` sub-OUs), `HR`, `Finance`, `Contractors`
 - [x] Security groups created: `IT-Admins`, `HR-Staff`, `VPN-Users`
 - [x] 10 user accounts created and distributed across the `IT/Admins`, `IT/Helpdesk`, `HR`, `Finance`, and `Contractors` OUs — two (`sjohnson`, `kpark`) intentionally left disabled as fixtures for account-lifecycle practice
+- [x] User placement and group membership verified via `Get-ADUser` and `Get-ADGroupMember`
 
 ## In Progress / Next Steps
 

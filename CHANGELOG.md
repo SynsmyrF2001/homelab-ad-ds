@@ -55,6 +55,15 @@ TEMPLATE — copy this block, fill it in, and paste it directly beneath the
   this public repository's history. Running the script with no arguments prompts for
   the value with masked input.
 
+### Verified
+- **Step 3 of the build plan is complete** — three security groups and ten user
+  accounts exist across the five OUs.
+- Account placement and enabled/disabled state confirmed with `Get-ADUser`: ten
+  accounts distributed across `IT/Admins`, `IT/Helpdesk`, `HR`, `Finance`, and
+  `Contractors`, with `sjohnson` and `kpark` correctly showing as disabled.
+- Group membership confirmed with `Get-ADGroupMember` against `IT-Admins`,
+  `HR-Staff`, and `VPN-Users`.
+
 ### Next
 - Practice AD user lifecycle operations — password reset, unlock, enable/disable,
   and moving accounts between OUs — starting with `sjohnson` and `kpark`.
