@@ -18,6 +18,7 @@ users, groups, and Group Policy.
 | [`CHANGELOG.md`](CHANGELOG.md) | Dated, reverse-chronological log of project progress |
 | [`docs/troubleshooting-log.md`](docs/troubleshooting-log.md) | Every issue hit during the build, with root cause and resolution |
 | [`scripts/new-ou-structure.ps1`](scripts/new-ou-structure.ps1) | PowerShell recreation of the OU hierarchy |
+| [`scripts/new-users-and-groups.ps1`](scripts/new-users-and-groups.ps1) | PowerShell provisioning of the security groups and user accounts |
 
 ---
 
@@ -86,12 +87,12 @@ users, groups, and Group Policy.
 - [x] Promoted to domain controller for a new forest (`Install-ADDSForest`) — domain `corp.local`, NetBIOS `CORP`
 - [x] Promotion verified via `Get-ADDomain` and `Get-ADDomainController`
 - [x] OU structure created: `IT` (with `Admins` and `Helpdesk` sub-OUs), `HR`, `Finance`, `Contractors`
+- [x] Security groups created: `IT-Admins`, `HR-Staff`, `VPN-Users`
+- [x] 10 user accounts created and distributed across the `IT/Admins`, `IT/Helpdesk`, `HR`, `Finance`, and `Contractors` OUs — two (`sjohnson`, `kpark`) intentionally left disabled as fixtures for account-lifecycle practice
 
 ## In Progress / Next Steps
 
-- [ ] Create 10+ user accounts distributed across OUs
-- [ ] Create security groups: `IT-Admins`, `HR-Staff`, `VPN-Users`
-- [ ] Practice AD user lifecycle operations: password reset, disable/enable, unlock, move between OUs
+- [ ] Practice AD user lifecycle operations: password reset, disable/enable, unlock, move between OUs (disabled accounts `sjohnson` and `kpark` are staged for this)
 - [ ] Create 3 GPOs: password policy (domain-linked), screen lock after idle (user OUs), USB storage block (Contractors OU only)
 - [ ] Verify GPO application with `gpupdate /force` and `gpresult /r`
 - [ ] Build a Windows 11 ARM client VM (UTM Virtualize/native ARM this time), join it to `corp.local`, and verify end-to-end domain login

@@ -10,6 +10,7 @@ the headings that apply to a given day.
 - **Changed** — reconfiguration of something that already existed
 - **Fixed** — problems resolved (cross-reference [`docs/troubleshooting-log.md`](docs/troubleshooting-log.md))
 - **Verified** — checks run to confirm a milestone actually works
+- **Security** — credential handling and anything affecting what is safe to publish
 
 <!--
 TEMPLATE — copy this block, fill it in, and paste it directly beneath the
@@ -29,6 +30,36 @@ TEMPLATE — copy this block, fill it in, and paste it directly beneath the
 ### Verified
 - ...
 -->
+
+---
+
+## 2026-08-23
+
+### Added
+- Created three security groups in `corp.local`: `IT-Admins`, `HR-Staff`, and
+  `VPN-Users`.
+- Created 10 user accounts distributed across the `IT/Admins`, `IT/Helpdesk`, `HR`,
+  `Finance`, and `Contractors` OUs.
+- Left two accounts (`sjohnson`, `kpark`) intentionally disabled at creation, as
+  fixtures for the account-lifecycle practice in the next phase.
+- Added `scripts/new-users-and-groups.ps1`, the PowerShell provisioning script for
+  the groups and accounts above, alongside the existing `new-ou-structure.ps1`.
+
+### Changed
+- Checked off group and user creation in the README milestone list, and listed the
+  new script in the repository contents table.
+
+### Security
+- `new-users-and-groups.ps1` takes the initial account password as a mandatory
+  `[SecureString]` parameter instead of a hardcoded literal, so no credential enters
+  this public repository's history. Running the script with no arguments prompts for
+  the value with masked input.
+
+### Next
+- Practice AD user lifecycle operations — password reset, unlock, enable/disable,
+  and moving accounts between OUs — starting with `sjohnson` and `kpark`.
+- Create the three GPOs: domain-linked password policy, idle screen lock on the user
+  OUs, and USB storage block scoped to the `Contractors` OU.
 
 ---
 
