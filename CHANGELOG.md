@@ -41,11 +41,25 @@ TEMPLATE — copy this block, fill it in, and paste it directly beneath the
 - Documented the full environment: UTM on Apple Silicon running DC01 in x86_64
   **Emulate** mode, static IP `192.168.64.10` with self-hosted DNS, and the
   `corp.local` / `CORP` single-domain forest.
-- Recorded seven build issues and their resolutions in the troubleshooting log,
-  covering the post-install boot loop, the DSRM password complexity failure during
+- Merged the existing build notes with additional entries into
+  `docs/troubleshooting-log.md` — 13 documented issues spanning the wrong ISO
+  download page, the ARM/x86 architecture conflict, VirtIO storage drivers, the
+  post-install boot loop, the DSRM password complexity failure during
   `Install-ADDSForest`, and the post-promotion reboot dialogs.
 - Added `scripts/new-ou-structure.ps1`, a PowerShell recreation of the OU hierarchy
   originally built by hand in ADUC.
+- Added Issue 14 (`New-NetAddress` typo raising `CommandNotFoundException`), bringing
+  the troubleshooting log to 14 documented issues.
+- Added `docs/images/` with a manifest mapping nine build screenshots to their
+  timestamps and the issues they evidence.
+
+### Changed
+- Corrected the root cause recorded for troubleshooting Issue 9 (missing default
+  gateway) after cross-checking the build screenshots: the `-DefaultGateway`
+  parameter was omitted from `New-NetIPAddress` as run, rather than being supplied
+  and ignored. The `New-NetRoute` fix is unchanged.
+- Annotated the static-IP command in the log's reference block so the omission that
+  caused Issue 9 is visible at the point of use.
 
 ### Verified
 - Build reached the **"OU structure created"** milestone: `IT` (with `Admins` and

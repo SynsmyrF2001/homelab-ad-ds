@@ -223,18 +223,34 @@ The real issue was that the ISO was still mounted (Issue 6), which caused subseq
 ### Issue 9 — Default gateway missing after setting static IP
 
 **What happened:**
-After running `New-NetIPAddress` to set the static IP, `ipconfig /all` showed the Default Gateway field as blank, even though the command included the `-DefaultGateway` parameter.
+After setting the static IP with `New-NetIPAddress`, `ipconfig /all` showed no IPv4 Default Gateway. Only an IPv6 link-local gateway (`fe80::842f:57ff:fea3:db64%4`) was listed. The IPv4 address itself had applied correctly — `192.168.64.10(Preferred)`, `DHCP Enabled: No`.
+
+**How it was caught:**
+Running `ipconfig /all` after pointing DNS at the server itself. The interface showed a valid IPv4 address and the correct DNS server, but the Default Gateway line carried no IPv4 entry. See `images/04-set-dns-and-ipconfig-all.png`.
+
+**Root cause:**
+The `-DefaultGateway` parameter was omitted from the `New-NetIPAddress` command as it was actually run:
+
+```powershell
+New-NetIPAddress -InterfaceAlias "Ethernet" -IPAddress 192.168.64.10 -PrefixLength 24
+```
+
+`New-NetIPAddress` assigns the address and prefix length. Without `-DefaultGateway` it does not create a default route, so nothing was ever configured to carry off-subnet traffic. Confirmed by two captures of the command — `images/03-new-netipaddress-static-ip.png` and `images/05-new-netaddress-typo.png` — neither of which includes the parameter.
 
 **Resolution:**
-Added the gateway route manually:
+Added the default route manually rather than reconfiguring the address:
+
 ```powershell
 New-NetRoute -DestinationPrefix "0.0.0.0/0" -NextHop 192.168.64.1 -InterfaceAlias "Ethernet"
 ```
+
+Passing `-DefaultGateway 192.168.64.1` to `New-NetIPAddress` in the first place would have achieved the same result in a single step.
 
 **What I learned:**
 - A missing default gateway means the machine can communicate on its local subnet but can't reach anything outside it — internet access and DNS resolution to external servers would fail.
 - `0.0.0.0/0` is the default route — it means "send all traffic not matching a more specific route to this next hop."
 - This is a foundational networking concept: local subnet traffic routes directly, everything else goes to the gateway.
+- A default gateway is a **route**, not a property of the IP address. That is why the address applied cleanly without one, and why `New-NetRoute` can supply it after the fact instead of requiring the address to be torn down and rebuilt.
 - In production this would cause AD DS promotion to fail if it needs to reach external DNS servers.
 
 ---
@@ -311,6 +327,32 @@ Entered a comment ("AD DS forest promotion reboot") and clicked OK to dismiss th
 
 ---
 
+### Issue 14 — `New-NetAddress` cmdlet not found (typo)
+
+**What happened:**
+Re-running the static IP configuration produced an error before the command executed:
+
+```
+New-NetAddress : The term 'New-NetAddress' is not recognized as the name of a cmdlet,
+function, script file, or operable program. Check the spelling of the name, or if a
+path was included, verify that the path is correct and try again.
+    + CategoryInfo          : ObjectNotFound: (New-NetAddress:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+```
+
+**Root cause:**
+The cmdlet name was mistyped. The correct name is `New-NetIPAddress` — there is no cmdlet called `New-NetAddress`.
+
+**Resolution:**
+Re-ran the same command with the correct cmdlet name, which completed normally. See `images/05-new-netaddress-typo.png`.
+
+**What I learned:**
+- `CommandNotFoundException` / `ObjectNotFound` means PowerShell could not resolve the name at all. That is a different failure from a cmdlet that exists but rejects its arguments, which raises a parameter-binding error instead. The distinction tells you immediately whether to check spelling or check syntax.
+- Tab completion prevents this class of error: typing `New-NetIP` and pressing Tab resolves to real cmdlet names only.
+- PowerShell cmdlet names are case-insensitive, which is why `Set-DnsclientServerAddress` ran without complaint despite the irregular capitalization. Spelling matters; casing does not.
+
+---
+
 ## Current configuration state
 
 | Setting | Value | Status |
@@ -352,7 +394,7 @@ Entered a comment ("AD DS forest promotion reboot") and clicked OK to dismiss th
 # Check current IP configuration
 ipconfig /all
 
-# Set static IP
+# Set static IP (include -DefaultGateway — omitting it caused Issue 9)
 New-NetIPAddress -InterfaceAlias "Ethernet" -IPAddress 192.168.64.10 -PrefixLength 24 -DefaultGateway 192.168.64.1
 
 # Set DNS to self
