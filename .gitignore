@@ -1,0 +1,84 @@
+# ---------------------------------------------------------------------------
+# homelab-ad-ds — .gitignore
+#
+# This repo is documentation + scripts only. Nothing here should ever be a
+# large binary or a machine-local artifact. The rules below cover OS/editor
+# cruft and, most importantly, VM media that would blow past GitHub's file
+# size limits if it ever landed in this folder by accident.
+# ---------------------------------------------------------------------------
+
+# --- macOS ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+Icon?
+
+# --- Windows (the lab guest OS writes these onto shared folders) ---
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# --- Linux ---
+.directory
+.fuse_hidden*
+.nfs*
+
+# --- Editors / IDEs ---
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.sublime-workspace
+*.sublime-project
+\#*\#
+.\#*
+
+# --- VM disk images & installation media -----------------------------------
+# NEVER commit these. A single Windows Server ISO or qcow2 disk is multiple
+# gigabytes; GitHub rejects files over 100 MB and warns above 50 MB. If one of
+# these needs to be preserved, keep it outside the repo or on external storage.
+*.iso
+*.img
+*.qcow2
+*.qcow
+*.vdi
+*.vmdk
+*.vhd
+*.vhdx
+*.ova
+*.ovf
+*.utm/
+*.utm
+
+# --- Archives (usually ISO/driver bundles in disguise) ---
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+*.tgz
+
+# --- Logs, dumps, and exports ---
+*.log
+*.etl
+*.dmp
+*.evtx
+
+# --- Secrets: credentials must never be committed to a portfolio repo ------
+# Lab passwords (DSRM, domain admin) belong in a password manager, not git.
+*.pfx
+*.p12
+*.key
+*.pem
+*.cer
+credentials.txt
+secrets.*
+.env
+.env.*
