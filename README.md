@@ -90,13 +90,17 @@ users, groups, and Group Policy.
 - [x] Security groups created: `IT-Admins`, `HR-Staff`, `VPN-Users`
 - [x] 10 user accounts created and distributed across the `IT/Admins`, `IT/Helpdesk`, `HR`, `Finance`, and `Contractors` OUs — two (`sjohnson`, `kpark`) intentionally left disabled as fixtures for account-lifecycle practice
 - [x] User placement and group membership verified via `Get-ADUser` and `Get-ADGroupMember`
+- [x] Three GPOs created and linked in GPMC:
+  - **Password Policy** — 12-character minimum, complexity enabled, 90-day maximum age — linked at the **domain root**
+  - **Screen Lock Policy** — `Interactive logon: Machine inactivity limit` = 600s — linked to `IT`, `HR`, `Finance`, `Contractors`
+  - **USB Block Policy** — Removable Storage Access denied — linked to `Contractors` **only**
+- [x] GPO application verified on DC01 with `gpresult /r`
 
 ## In Progress / Next Steps
 
-- [ ] Practice AD user lifecycle operations: password reset, disable/enable, unlock, move between OUs (disabled accounts `sjohnson` and `kpark` are staged for this)
-- [ ] Create 3 GPOs: password policy (domain-linked), screen lock after idle (user OUs), USB storage block (Contractors OU only)
-- [ ] Verify GPO application with `gpupdate /force` and `gpresult /r`
+- [ ] Practice AD user lifecycle operations: password reset, disable/enable, move between OUs (disabled accounts `sjohnson` and `kpark` are staged for this)
 - [ ] Build a Windows 11 ARM client VM (UTM Virtualize/native ARM this time), join it to `corp.local`, and verify end-to-end domain login
+- [ ] Confirm the screen lock and USB restrictions take effect on the domain-joined client — both target workstations, so verifying on DC01 alone does not demonstrate them in use
 
 ---
 

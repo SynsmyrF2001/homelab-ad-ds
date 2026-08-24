@@ -44,10 +44,22 @@ TEMPLATE — copy this block, fill it in, and paste it directly beneath the
   fixtures for the account-lifecycle practice in the next phase.
 - Added `scripts/new-users-and-groups.ps1`, the PowerShell provisioning script for
   the groups and accounts above, alongside the existing `new-ou-structure.ps1`.
+- Created and linked three Group Policy Objects in GPMC:
+  - **Password Policy** — minimum password length 12 characters, complexity
+    requirements enabled, maximum password age 90 days. Linked at the **domain
+    root**, so it applies to every account in `corp.local`.
+  - **Screen Lock Policy** — `Interactive logon: Machine inactivity limit` set to
+    600 seconds (10 minutes). Linked to the `IT`, `HR`, `Finance`, and
+    `Contractors` OUs.
+  - **USB Block Policy** — Removable Storage Access set to deny all. Linked to the
+    `Contractors` OU **only**, so the restriction is scoped to contractors rather
+    than applied domain-wide.
 
 ### Changed
 - Checked off group and user creation in the README milestone list, and listed the
   new script in the repository contents table.
+- Checked off GPO creation and DC01 verification in the README milestone list, and
+  narrowed the remaining GPO work to client-side confirmation.
 
 ### Security
 - `new-users-and-groups.ps1` takes the initial account password as a mandatory
@@ -63,12 +75,17 @@ TEMPLATE — copy this block, fill it in, and paste it directly beneath the
   `Contractors`, with `sjohnson` and `kpark` correctly showing as disabled.
 - Group membership confirmed with `Get-ADGroupMember` against `IT-Admins`,
   `HR-Staff`, and `VPN-Users`.
+- **Step 4 of the build plan is complete** — all three GPOs are built and linked.
+- GPO application confirmed on DC01 with `gpresult /r`.
 
 ### Next
-- Practice AD user lifecycle operations — password reset, unlock, enable/disable,
-  and moving accounts between OUs — starting with `sjohnson` and `kpark`.
-- Create the three GPOs: domain-linked password policy, idle screen lock on the user
-  OUs, and USB storage block scoped to the `Contractors` OU.
+- Practice AD user lifecycle operations — password reset, enable/disable, and moving
+  accounts between OUs — starting with `sjohnson` and `kpark`.
+- Build the Windows 11 ARM client VM in UTM (Virtualize / native ARM this time),
+  join it to `corp.local`, and verify end-to-end domain login.
+- Confirm the GPOs apply to a domain-joined client rather than only to DC01 — the
+  screen lock and USB restrictions are user/workstation policies, so the client VM
+  is where they can actually be observed taking effect.
 
 ---
 
