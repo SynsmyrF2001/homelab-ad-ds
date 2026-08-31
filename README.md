@@ -99,8 +99,13 @@ users, groups, and Group Policy.
 ## In Progress / Next Steps
 
 - [ ] Practice AD user lifecycle operations: password reset, disable/enable, move between OUs (disabled accounts `sjohnson` and `kpark` are staged for this)
-- [ ] Build a Windows 11 ARM client VM (UTM Virtualize/native ARM this time), join it to `corp.local`, and verify end-to-end domain login
-- [ ] Confirm the screen lock and USB restrictions take effect on the domain-joined client — both target workstations, so verifying on DC01 alone does not demonstrate them in use
+- [ ] **Windows 11 ARM64 client (`WIN11-CLIENT01`) — in progress:**
+  - [x] VM created in UTM using **Virtualize** mode (native ARM64, no x86 emulation needed)
+  - [x] Windows 11 Enterprise ARM64 installed, booting from disk
+  - [ ] Network adapter driver — **currently blocked**, no adapter detected (see troubleshooting log Issue 19)
+  - [ ] Configure client DNS to point at DC01 (`192.168.64.10`) — blocked by the adapter
+  - [ ] Join to `corp.local` and verify end-to-end domain login — blocked by DNS
+  - [ ] Verify the Screen Lock and USB Block GPOs apply on the client with `gpresult /r`
 
 ---
 
