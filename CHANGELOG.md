@@ -33,6 +33,56 @@ TEMPLATE — copy this block, fill it in, and paste it directly beneath the
 
 ---
 
+## 2026-08-31
+
+Step 5 progress checkpoint — the client VM is built and installed, but **not yet
+joined to the domain**. Work is paused mid-troubleshooting on a network adapter
+driver.
+
+### Added
+- Created `WIN11-CLIENT01`, a Windows 11 Enterprise ARM64 client VM in UTM. Unlike
+  DC01, this VM uses **Virtualize** mode rather than Emulate — Windows 11 ships a
+  native ARM64 build, so no x86 translation is needed and the VM runs at native
+  speed.
+- Installed Windows 11 successfully after working through four boot and setup
+  issues, documented as Issues 15–18 in the troubleshooting log:
+  - UEFI Interactive Shell on first boot, resolved by launching `bootaa64.efi`
+    manually from the `FS0:` prompt.
+  - VM storage misconfigured at 4.86 GB, caught on the creation Summary screen and
+    corrected — ultimately to 64 GB, Windows 11's actual minimum.
+  - Setup's "it looks like you started an upgrade" prompt on a blank disk, answered
+    "No" for a clean install.
+  - Setup repeatedly restarting from the ISO after its own mid-install reboot,
+    broken by clearing leftover partitions and ejecting the ISO early in the install
+    phase rather than at the end.
+
+### In progress
+- **Issue 19 — no network adapter detected on the client.** `ipconfig /all` shows no
+  Ethernet section at all, and Device Manager lists the virtual chipset as
+  unrecognized devices. Windows 11 ARM64 has no inbox driver for QEMU/UTM
+  paravirtualized hardware; both `virtio-net-pci` and emulated `e1000` were tried
+  without success. The `utm-guest-tools-0.1.271` installer resolved display, disk,
+  HID, and audio, but not the Ethernet Controller. Currently pointing Device Manager
+  at the ISO's `Drivers\NetKVM` folder manually, since its recursive search did not
+  find a match.
+- Client DNS configuration and the domain join are **both blocked** until the adapter
+  appears — neither has started.
+
+### Changed
+- Refreshed the troubleshooting log's status header, current-configuration table, and
+  next-steps list, which still described users, groups, and GPOs as pending after
+  those steps were completed on 2026-08-23.
+
+### Next
+- Point Device Manager directly at the correct `NetKVM\<version>\ARM64` subfolder to
+  install the network driver.
+- Once the adapter appears: set the client's DNS to `192.168.64.10` (DC01), join it
+  to `corp.local`, and verify domain login end to end.
+- Confirm the Screen Lock and USB Block GPOs actually take effect on the joined
+  client — they target workstations, so DC01 alone cannot demonstrate them.
+
+---
+
 ## 2026-08-23
 
 ### Added

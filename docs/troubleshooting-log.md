@@ -3,7 +3,7 @@
 **Project:** Windows Server AD DS homelab on Apple Silicon MacBook Pro
 **Environment:** UTM (x86 emulation) on M-series Mac
 **Date:** August 2026
-**Status:** In progress — DC01 promoted to domain controller for the `corp.local` forest; OU structure created. User accounts, security groups, and GPOs are next.
+**Status:** In progress — DC01 fully built: forest promoted, OUs, users, groups and GPOs all in place. Client VM `WIN11-CLIENT01` is installed but has no working network adapter yet (Issue 19), so the domain join has not started.
 
 > For the authoritative current-state summary (VM specs, network settings, domain
 > details, milestone checklist), see [`../README.md`](../README.md). This document is
@@ -353,6 +353,184 @@ Re-ran the same command with the correct cmdlet name, which completed normally. 
 
 ---
 
+## Issue log — Step 5: Windows 11 ARM64 client (WIN11-CLIENT01)
+
+The entries below cover the client VM build. Unlike DC01, this VM uses UTM's
+**Virtualize** mode rather than Emulate, since Windows 11 is available as a native
+ARM64 build — no x86 translation needed, and the VM runs at native speed as a result.
+
+---
+
+### Issue 15 — UEFI Interactive Shell on first boot instead of Windows Setup
+
+**What happened:**
+On first boot the VM dropped into EDK II's UEFI Interactive Shell rather than
+launching Windows Setup from the mounted ISO.
+
+**Root cause:**
+UTM/QEMU's ARM64 firmware has no NVRAM boot entry on a brand-new VM. With no
+persisted entry telling it what to boot, the firmware falls through to the
+interactive shell rather than guessing which attached device to try.
+
+**Resolution:**
+Booted the ISO's ARM64 boot loader manually from the shell prompt:
+
+```
+FS0:
+cd EFI\boot
+bootaa64.efi
+```
+
+**What I learned:**
+- `FS0:` is the firmware's name for the first recognized filesystem — here, the
+  mounted installation ISO. The shell addresses devices by handle, not drive letter.
+- `bootaa64.efi` is the ARM64 EFI boot loader. The x86_64 equivalent is
+  `bootx64.efi` — the filename encodes the architecture, which is a quick way to
+  confirm you have media matching the VM.
+- This is the same class of problem as the DC01 boot loop (Issue 6), approached
+  from the opposite direction: there the firmware found bootable media it should
+  have ignored, here it found media it did not know to use.
+
+---
+
+### Issue 16 — VM storage misconfigured as 4.86 GB instead of 40 GB
+
+**What happened:**
+The UTM VM creation Summary screen showed a storage size of 4.86 GB rather than the
+intended 40 GB.
+
+**How it was caught:**
+Reviewing the Summary screen before starting the install — the last checkpoint the
+wizard offers before the VM is created.
+
+**Root cause:**
+The storage size step in the creation wizard was not set correctly on the first pass
+through.
+
+**Resolution:**
+Went back to the storage step and corrected the value. Later increased it again to
+64 GB, to clear Windows 11's actual minimum requirement with room to spare.
+
+**What I learned:**
+- Windows 11 requires a 64 GB minimum disk — notably larger than Windows Server's
+  32 GB, and larger than the 40 GB originally planned.
+- Catching this on the Summary screen cost one wizard step. Catching it after
+  installation would have meant expanding the virtual disk *and* extending the
+  partition inside Windows — a far more involved fix for the same mistake.
+
+---
+
+### Issue 17 — "It looks like you started an upgrade and booted from installation media" prompt
+
+**What happened:**
+Windows Setup displayed a prompt asking whether an upgrade had been started, despite
+the target disk being blank with no prior operating system installed.
+
+**Resolution:**
+Selected **No** to perform a clean installation — the correct path, since there was
+no existing installation to upgrade.
+
+**What I learned:**
+Setup asks this defensively rather than because it detected an actual upgrade in
+progress. On a blank disk the answer is always "No"; answering "Yes" would send
+Setup looking for an existing Windows installation that does not exist.
+
+---
+
+### Issue 18 — Setup repeatedly restarted from the ISO instead of continuing installation
+
+**What happened:**
+After Setup's first automatic mid-install reboot, the VM dropped back into the UEFI
+shell and defaulted to booting `FS0:` — the ISO — again, relaunching Setup from
+scratch instead of continuing the in-progress installation on the hard disk. This
+repeated across multiple attempts, and each aborted attempt left additional partition
+structure behind on the disk.
+
+**Root cause:**
+UTM's ARM64 firmware and its `startup.nsh` default to the CD-ROM boot device when no
+persisted boot entry exists. Windows only writes its own boot entry once the
+installation is far enough along; every automatic restart before that point therefore
+found the ISO first and started over. The loop was self-sustaining — Setup could never
+reach the stage where it would have created the entry that breaks the loop.
+
+**Resolution:**
+Two parts, in order:
+
+1. Deleted the leftover partitions from previous aborted attempts, returning the disk
+   to clean unallocated space.
+2. **Ejected the installation ISO from UTM's CD/DVD drive early in the install phase**
+   — as soon as Setup had copied files and no longer needed the media — rather than
+   waiting until the install neared completion. With no bootable media on `FS0:`, no
+   subsequent automatic restart had an ISO to latch onto.
+
+Confirmed by the UEFI boot log showing:
+
+```
+BdsDxe: starting Boot0006 "Windows Boot Manager"
+```
+
+loading correctly from the hard disk.
+
+**What I learned:**
+- Setup's mid-install reboots are the vulnerable window. The installer depends on the
+  firmware coming back to the *disk*, but has not yet created the boot entry that
+  makes that happen — so the boot order has to be right by default, or the media has
+  to be removed.
+- Each failed attempt compounded the problem by leaving partition structure behind.
+  Returning to clean unallocated space before each retry mattered as much as fixing
+  the boot order itself.
+- This is Issue 6 on DC01 in a harsher form. There, the ISO caused a boot loop
+  *after* a completed install and was fixed by clearing the drive path afterward.
+  Here it prevented the install from ever completing, so the media had to come out
+  mid-flight.
+
+---
+
+### Issue 19 — No network adapter visible in Windows after install ⚠️ IN PROGRESS
+
+**What happened:**
+After installation completed, `ipconfig /all` showed no Ethernet adapter section at
+all — not a disconnected adapter, but no adapter present. Device Manager showed the
+entire virtual chipset as unrecognized entries under "Other devices" / "Unknown
+device".
+
+**Root cause:**
+Windows 11 ARM64 ships no inbox driver for QEMU/UTM's paravirtualized hardware. Both
+NIC types available in UTM's VM settings were tried — `virtio-net-pci` and the
+emulated `e1000` — and neither has a built-in ARM64 driver in Windows 11.
+
+**Progress so far:**
+Running the `utm-guest-tools-0.1.271` installer from the mounted UTM Guest Tools ISO
+resolved most of the unrecognized devices — display, disk, HID, audio — but **not**
+the Ethernet Controller, which remains unrecognized.
+
+Currently locating the driver manually from the ISO's `Drivers\NetKVM` folder via
+Device Manager → Update driver → Browse my computer. The automatic recursive
+subfolder search did not find a match on its own.
+
+**Status: UNRESOLVED as of this entry.**
+Next step is pointing Device Manager directly at the correct
+`NetKVM\<version>\ARM64` subfolder once the right one is confirmed. DNS
+configuration and the domain join are both blocked until the adapter appears.
+
+**What I learned so far:**
+- This is the ARM64 counterpart to Issue 4 on DC01, where VirtIO storage drivers had
+  to be loaded from the same Guest Tools ISO mid-install. Same root problem —
+  Windows has no inbox driver for paravirtualized QEMU hardware — surfacing at a
+  different point in the build.
+- Switching from `virtio-net-pci` to the emulated `e1000` is worth trying because
+  emulated devices often *do* have inbox drivers. That it did not help here reflects
+  ARM64's much thinner inbox driver set compared to x86_64.
+- "No adapter listed at all" and "adapter listed but disconnected" are different
+  failures. The first is a driver problem; the second is a network configuration
+  problem. `ipconfig /all` showing no Ethernet section at all pointed at drivers
+  immediately.
+- Device Manager's recursive search can miss architecture-specific subfolders. When
+  it does, pointing it at the exact folder containing the `.inf` for your
+  architecture is the reliable fallback.
+
+---
+
 ## Current configuration state
 
 | Setting | Value | Status |
@@ -368,9 +546,13 @@ Re-ran the same command with the correct cmdlet name, which completed normally. 
 | AD DS role | Installed | Confirmed |
 | Domain controller promotion | `corp.local` forest, NetBIOS `CORP` | Confirmed via `Get-ADDomain` / `Get-ADDomainController` |
 | OU structure | IT (Admins, Helpdesk), HR, Finance, Contractors | Created |
-| User accounts & security groups | Not yet created | Next step |
-| GPOs | Not yet configured | Pending |
-| Windows 11 ARM client VM | Not yet built | Pending |
+| Security groups | `IT-Admins`, `HR-Staff`, `VPN-Users` | Confirmed via `Get-ADGroupMember` |
+| User accounts | 10 across the five OUs (`sjohnson`, `kpark` disabled by design) | Confirmed via `Get-ADUser` |
+| GPOs | Password Policy (domain root), Screen Lock (IT/HR/Finance/Contractors), USB Block (Contractors) | Linked; confirmed on DC01 via `gpresult /r` |
+| Windows 11 ARM client VM | `WIN11-CLIENT01` — UTM Virtualize mode, ARM64 | Installed; OS boots from disk |
+| Client network adapter | No adapter detected — driver missing | **Unresolved — see Issue 19** |
+| Client DNS configuration | Not started — blocked by the adapter | Pending |
+| Domain join | Not started — blocked by the adapter | Pending |
 
 ---
 
@@ -380,11 +562,14 @@ Re-ran the same command with the correct cmdlet name, which completed normally. 
 2. ~~Install AD DS role~~ — done
 3. ~~Promote to domain controller (create new forest `corp.local`)~~ — done
 4. ~~Build OU structure: IT, HR, Finance, Contractors~~ — done (see [`../scripts/new-ou-structure.ps1`](../scripts/new-ou-structure.ps1))
-5. Create 10+ user accounts and security groups (`IT-Admins`, `HR-Staff`, `VPN-Users`)
-6. Practice AD user lifecycle operations: password reset, disable/enable, unlock, move between OUs
-7. Configure 3 GPOs (password policy, screen lock, USB restriction on Contractors OU)
-8. Create Windows 11 ARM client VM and join to `corp.local`
-9. Verify GPOs applying with `gpresult /r` on client
+5. ~~Create 10+ user accounts and security groups (`IT-Admins`, `HR-Staff`, `VPN-Users`)~~ — done (see [`../scripts/new-users-and-groups.ps1`](../scripts/new-users-and-groups.ps1))
+6. ~~Configure 3 GPOs (password policy, screen lock, USB restriction on Contractors OU)~~ — done, verified on DC01
+7. ~~Create Windows 11 ARM client VM~~ — built and installed as `WIN11-CLIENT01`
+8. **Install the client's network adapter driver** — in progress, see Issue 19
+9. Configure client DNS to point at DC01 (`192.168.64.10`) — blocked by step 8
+10. Join `WIN11-CLIENT01` to `corp.local` and verify domain login — blocked by step 9
+11. Verify GPOs applying with `gpresult /r` on the client
+12. Practice AD user lifecycle operations: password reset, disable/enable, move between OUs
 
 ---
 
