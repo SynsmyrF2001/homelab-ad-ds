@@ -33,6 +33,66 @@ TEMPLATE — copy this block, fill it in, and paste it directly beneath the
 
 ---
 
+## 2026-09-02
+
+Step 5 milestone — the client VM's network adapter is fully working after an
+extended troubleshooting session and a full VM rebuild. **Step 5 is not complete:**
+client DNS configuration and the domain join both remain outstanding.
+
+### Fixed
+- **Diagnosed the network driver mismatch that blocked the previous checkpoint.**
+  Reading the device's Hardware Ids showed `PCI\VEN_8086&DEV_100E` — Intel's vendor
+  ID, identifying the emulated NIC as an Intel 82540EM ("e1000"), not VirtIO
+  hardware. The NetKVM driver being tried matches `VEN_1AF4` (Red Hat) and was never
+  going to bind to it, and Windows 11 ARM64 has no inbox driver for the legacy Intel
+  e1000 at all. This corrects the partly-wrong root cause recorded for Issue 19 on
+  2026-08-31.
+- **Rebuilt `WIN11-CLIENT01` from scratch** in UTM (ARM64, Virtualize mode) with the
+  emulated NIC set to `virtio-net-pci` **from the very first boot**, so Windows would
+  never need to be moved onto different hardware after installation.
+- Windows 11 Enterprise ARM64 installed cleanly on the rebuilt VM.
+- **UTM Guest Tools installed the Red Hat VirtIO Ethernet Adapter driver
+  automatically** — no manual driver-folder browsing required, because the hardware
+  and the bundled driver finally matched.
+- Adapter verified with `ipconfig /all`: real DHCP IPv4 address **192.168.64.4**,
+  with working default gateway and DNS servers.
+
+### Added
+- Troubleshooting log Issues 20–24 covering the full arc:
+  - **20** — Ethernet Controller stuck as an unrecognized device; wrong driver family
+    entirely, caught by reading Hardware Ids.
+  - **21** — changing the NIC on an already-installed VM caused a cascading boot
+    failure: unresponsive firmware boot picker, Automatic Repair, a
+    `PAGE_FAULT_IN_NONPAGED_AREA` BSOD, and ultimately VM corruption that made a
+    rebuild cheaper than continued debugging.
+  - **22** — on the rebuilt VM, the UEFI shell's `FS0:` mapped to a blank EFI System
+    Partition instead of the installer; `map` revealed the ISO was not attached at
+    all.
+  - **23** — the "Start boot option" firmware hang recurred on the clean VM, but from
+    a benign UTM/QEMU ARM64 firmware quirk rather than corruption — safe to force
+    stop, since it is a pre-boot state with no active disk writes.
+  - **24** — adapter fully resolved and verified.
+
+### Changed
+- Closed out Issue 19, which was still marked `IN PROGRESS`, with a pointer to Issues
+  20–24 and a note that its originally recorded root cause was partly wrong. The
+  original text is preserved rather than rewritten, so the diagnostic path stays
+  visible alongside the correction.
+- Refreshed the troubleshooting log's status header, configuration table, and
+  next-steps list to reflect the working adapter.
+
+### Next
+- **Point the client's DNS at DC01 (`192.168.64.10`).** DHCP-issued DNS from UTM's
+  NAT will not resolve the AD-specific SRV records (`_ldap._tcp.dc._msdcs.corp.local`
+  and similar) that a client uses to locate a domain controller, so the join would
+  fail despite working internet connectivity.
+- Join `WIN11-CLIENT01` to `corp.local` and verify end-to-end domain login with one
+  of the ten provisioned accounts.
+- Verify the Screen Lock and USB Block GPOs actually take effect on the joined
+  client with `gpresult /r`.
+
+---
+
 ## 2026-08-31
 
 Step 5 progress checkpoint — the client VM is built and installed, but **not yet
