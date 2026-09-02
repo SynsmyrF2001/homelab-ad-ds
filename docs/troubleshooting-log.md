@@ -3,7 +3,7 @@
 **Project:** Windows Server AD DS homelab on Apple Silicon MacBook Pro
 **Environment:** UTM (x86 emulation) on M-series Mac
 **Date:** August 2026
-**Status:** In progress — DC01 fully built: forest promoted, OUs, users, groups and GPOs all in place. Client VM `WIN11-CLIENT01` is installed but has no working network adapter yet (Issue 19), so the domain join has not started.
+**Status:** In progress — DC01 fully built: forest promoted, OUs, users, groups and GPOs all in place. Client VM `WIN11-CLIENT01` rebuilt from scratch and fully networked (Issue 24). Remaining: point the client's DNS at DC01, then join it to `corp.local`.
 
 > For the authoritative current-state summary (VM specs, network settings, domain
 > details, milestone checklist), see [`../README.md`](../README.md). This document is
@@ -486,7 +486,7 @@ loading correctly from the hard disk.
 
 ---
 
-### Issue 19 — No network adapter visible in Windows after install ⚠️ IN PROGRESS
+### Issue 19 — No network adapter visible in Windows after install
 
 **What happened:**
 After installation completed, `ipconfig /all` showed no Ethernet adapter section at
@@ -508,10 +508,21 @@ Currently locating the driver manually from the ISO's `Drivers\NetKVM` folder vi
 Device Manager → Update driver → Browse my computer. The automatic recursive
 subfolder search did not find a match on its own.
 
-**Status: UNRESOLVED as of this entry.**
-Next step is pointing Device Manager directly at the correct
-`NetKVM\<version>\ARM64` subfolder once the right one is confirmed. DNS
-configuration and the domain join are both blocked until the adapter appears.
+**Status: RESOLVED — see Issues 20–24.**
+The `NetKVM` approach recorded above never succeeded, and the reason turned out to
+be a misdiagnosis rather than a missing subfolder: checking the device's Hardware
+Ids (Issue 20) showed the emulated NIC was an **Intel** e1000, not VirtIO hardware,
+so the VirtIO driver was never going to bind to it no matter which folder Device
+Manager was pointed at. The fix was to change the NIC type rather than to keep
+hunting for a driver — which in turn led to Issues 21–24 and, ultimately, a full VM
+rebuild.
+
+Note the root cause as originally written above is **partly wrong**: it states that
+both `virtio-net-pci` and `e1000` were tried and neither had an ARM64 driver. The
+hardware ID evidence in Issue 20 shows the VM was presenting Intel e1000 hardware at
+the time, so the VirtIO driver was being tested against hardware it could not match.
+The entry is left as written to preserve the actual diagnostic path; the correction
+belongs with the evidence that produced it.
 
 **What I learned so far:**
 - This is the ARM64 counterpart to Issue 4 on DC01, where VirtIO storage drivers had
@@ -528,6 +539,208 @@ configuration and the domain join are both blocked until the adapter appears.
 - Device Manager's recursive search can miss architecture-specific subfolders. When
   it does, pointing it at the exact folder containing the `.inf` for your
   architecture is the reliable fallback.
+
+---
+
+### Issue 20 — Ethernet Controller stuck as unrecognized device: wrong driver family entirely
+
+**What happened:**
+Following the initial Windows 11 ARM64 install, Device Manager showed the Ethernet
+Controller as an unrecognized "Other device". Installing the NetKVM driver from the
+UTM Guest Tools ISO failed regardless of which subfolder was pointed at.
+
+**How it was caught:**
+Checking the device's **Hardware Ids** under Device Manager → Properties → Details,
+rather than continuing to guess at driver folders. It showed:
+
+```
+PCI\VEN_8086&DEV_100E...
+```
+
+**Root cause:**
+`VEN_8086` is Intel's PCI vendor ID, identifying the emulated NIC as an Intel
+82540EM — the "e1000". NetKVM is the **VirtIO** network driver and matches
+`VEN_1AF4`, Red Hat's vendor ID. It was never going to bind to Intel hardware no
+matter which subfolder was selected. Compounding this, Windows 11 ARM64 has no inbox
+driver for the legacy Intel e1000 chip at all, so the device had no path to working
+in that configuration.
+
+**Resolution:**
+Identified that the VM's emulated NIC needed to be changed to `virtio-net-pci` in
+UTM's VM settings, so the hardware would match the driver that was actually
+available. Making that change on an already-installed VM is what triggered Issues
+21–24 below.
+
+**What I learned:**
+- **Hardware Ids are the ground truth for any unknown device.** `VEN_xxxx` is the
+  vendor and `DEV_xxxx` the device; a driver only binds if its `.inf` claims that
+  exact pair. Reading them first would have ruled out NetKVM immediately and saved
+  the entire manual folder-hunting effort in Issue 19.
+- Vendor IDs worth recognizing here: `8086` = Intel (an old joke on the 8086 CPU),
+  `1AF4` = Red Hat / VirtIO.
+- "The driver won't install" and "this is the wrong driver family" look identical
+  from the outside. The difference is only visible in the hardware IDs.
+
+---
+
+### Issue 21 — Changing the NIC on a live VM triggered cascading boot failure and corruption
+
+**What happened:**
+After switching the emulated Network Card to `virtio-net-pci` in UTM's settings on
+the already-installed VM, the VM hit a graphical firmware "boot option" picker screen
+that was completely unresponsive — to clicks, Enter, Space, and multi-minute waits
+alike.
+
+The failure then escalated across several attempts:
+
+1. Changing UTM's USB Support setting (USB 3.0 XHCI → USB 2.0, on the theory that
+   firmware-level input polling was at fault) did not help.
+2. A forced restart broke through to Windows **Automatic Repair** ("Your PC did not
+   start correctly").
+3. Restarting from Automatic Repair produced a full **BSOD:
+   `PAGE_FAULT_IN_NONPAGED_AREA`**.
+4. After the BSOD's automatic restart, the VM landed back on the same frozen boot
+   picker — this time for several hours with zero progress.
+
+**Root cause:**
+Changing a VM's core hardware after the OS is installed alters the virtual PCI bus
+enumeration, which can invalidate the firmware's NVRAM boot order. Combined with
+several forced stops during active boot and install phases, this most likely left the
+disk's filesystem and/or NVRAM state genuinely corrupted — not merely slow.
+
+**Resolution:**
+Rather than continuing to debug an instance carrying accumulated, stacked damage,
+**deleted the VM and rebuilt it from scratch** — this time setting `virtio-net-pci`
+as the emulated NIC *before* installing Windows, so the OS would never need to be
+moved onto different hardware after the fact.
+
+**What I learned:**
+- Hardware changes are cheap **before** an OS is installed and expensive after.
+  Windows binds drivers and boot configuration to the hardware it finds at install
+  time; swapping a device underneath a running installation is closer to moving a
+  physical disk into a different machine than to changing a setting.
+- `PAGE_FAULT_IN_NONPAGED_AREA` means the kernel referenced memory that was not
+  present — commonly a faulty driver or corrupted system files, both plausible after
+  a hardware swap plus forced stops.
+- **Knowing when to stop debugging is a real skill.** Once several distinct failures
+  had stacked on one instance, each additional fix attempt risked adding damage
+  rather than removing it. A rebuild took less time than continuing would have, and
+  produced a clean baseline instead of an uncertain one.
+- The rebuild was not a defeat: it converted an unknown-state VM into a known-good
+  one, and the correct configuration was known in advance this time.
+
+---
+
+### Issue 22 — Rebuilt VM's UEFI shell showed an empty target disk instead of the install ISO
+
+**What happened:**
+On the freshly rebuilt VM, after selecting the install location during Windows Setup,
+an automatic reboot dropped into the UEFI Interactive Shell as expected — but this
+time `FS0:` mapped to the new virtual disk's blank **EFI System Partition** (0 files,
+0 dirs) rather than the installer media, and `cd EFI\boot` failed.
+
+**How it was caught:**
+Running `map` at the shell prompt to redisplay the full filesystem and block-device
+table. It showed **no CD-ROM or ISO device present at all** — the Windows 11 install
+ISO was not attached to the VM's CD/DVD drive at that point.
+
+**Root cause:**
+The ISO was unmounted from the VM's drive settings, so there was no installer media
+for the firmware to find or for the shell to address.
+
+**Resolution:**
+Confirmed the unmounted state in UTM's VM drive settings, reattached the ISO, and
+Setup continued normally from there.
+
+**What I learned:**
+- `FS0:` is positional, **not** a stable name for the installer. It is simply the
+  first filesystem the firmware recognizes — the ISO in Issue 15, a blank EFI System
+  Partition here. Assuming it always means "the install media" is how this looked
+  confusing at first.
+- `map` is the diagnostic command in the UEFI shell: it answers "what devices does
+  the firmware actually see?" before any assumption about what should be there.
+- An empty ESP with 0 files is itself informative — it says the disk exists and is
+  partitioned but nothing has been written to it yet.
+
+---
+
+### Issue 23 — "Start boot option" firmware hang recurred on the clean rebuilt VM, from a different cause
+
+**What happened:**
+Later in the same install — after ejecting the installation ISO mid-setup (the fix
+carried over from Issue 18) and letting Setup restart itself — the VM again hit the
+same unresponsive graphical "Start boot option" screen. It stayed there a full 5
+minutes, with both click/Enter attempts and idle waiting tried, with no change.
+
+**Root cause:**
+This VM had **no history of forced shutdowns or hardware swaps**, so the disk and
+NVRAM corruption that explained Issue 21 could be ruled out. That leaves a
+reproducible UTM/QEMU ARM64 **Virtualize**-mode firmware quirk, occurring at the
+specific moment between Setup's automatic restarts — before Windows has registered a
+persistent NVRAM boot entry.
+
+**Resolution:**
+Because this screen is a **pre-boot firmware state with no active disk writes**, it
+was safe to Force Stop and restart the VM — unlike interrupting an active install
+phase, which is what caused damage in Issue 21. The restart immediately resolved it
+and the VM proceeded straight into the Windows out-of-box setup screens.
+
+**What I learned:**
+- **The same symptom can have different causes, and the safe response depends on
+  which.** This screen looked identical to the Issue 21 hang, but the surrounding
+  history made the difference: there it was a symptom of real corruption, here it was
+  a benign firmware stall.
+- Knowing whether a VM is mid-write is what determines whether a force stop is safe.
+  A firmware picker screen is idle; an install copying files is not. That judgment,
+  not the symptom, decides the action.
+- Clean history is itself diagnostic evidence. Being able to say "this VM has never
+  been force-stopped or had hardware changed" eliminated an entire class of cause
+  immediately — one practical payoff of having rebuilt rather than patched.
+
+---
+
+### Issue 24 — Network adapter fully resolved on the rebuilt VM ✅
+
+**What happened:**
+After completing OOBE and reaching the desktop, running the UTM Guest Tools installer
+(`utm-guest-tools-latest.iso`) **automatically installed and bound the "Red Hat VirtIO
+Ethernet Adapter" driver** under Device Manager's Network adapters category — with no
+manual "Update driver → browse to NetKVM folder" steps needed this time.
+
+**Root cause (of the success):**
+Because the VM had `virtio-net-pci` configured from the very first boot, the driver
+bundled on the Guest Tools ISO matched the hardware's vendor/device ID correctly out
+of the box. This is precisely the mismatch that Issue 20 identified and that Issues
+21–23 were spent correcting.
+
+**Resolution / verification:**
+Confirmed via `ipconfig /all` that the adapter obtained a real DHCP IPv4 address:
+
+| Setting | Value |
+|---|---|
+| IPv4 address | 192.168.64.4 (DHCP) |
+| Default gateway | Present |
+| DNS servers | Present (DHCP-issued) |
+
+**Status: RESOLVED.** The adapter is fully working.
+
+**Next step — why DHCP-issued DNS is not sufficient:**
+The client's DNS must be pointed specifically at **DC01 (192.168.64.10)** before
+attempting the domain join. Generic DHCP-issued DNS from UTM's NAT will not resolve
+the AD-specific **SRV records** (`_ldap._tcp.dc._msdcs.corp.local` and similar) that a
+client uses to locate a domain controller — so the join would fail even though general
+internet connectivity works fine.
+
+**What I learned:**
+- The whole arc from Issue 19 to here resolved to a **single configuration choice**
+  made at VM creation time. Setting the NIC correctly up front cost nothing; getting
+  it wrong cost a driver hunt, a corrupted VM, and a full rebuild.
+- "It works automatically now" is the signature of correctly matched hardware and
+  drivers. Fighting a driver into place is usually a signal that something upstream
+  is wrong — as it was in Issue 20.
+- Working internet connectivity does **not** imply a client can join a domain. Domain
+  location depends on DNS SRV records that only the DC serves, which is why this step
+  has its own prerequisite rather than being covered by "the network works."
 
 ---
 
@@ -549,10 +762,10 @@ configuration and the domain join are both blocked until the adapter appears.
 | Security groups | `IT-Admins`, `HR-Staff`, `VPN-Users` | Confirmed via `Get-ADGroupMember` |
 | User accounts | 10 across the five OUs (`sjohnson`, `kpark` disabled by design) | Confirmed via `Get-ADUser` |
 | GPOs | Password Policy (domain root), Screen Lock (IT/HR/Finance/Contractors), USB Block (Contractors) | Linked; confirmed on DC01 via `gpresult /r` |
-| Windows 11 ARM client VM | `WIN11-CLIENT01` — UTM Virtualize mode, ARM64 | Installed; OS boots from disk |
-| Client network adapter | No adapter detected — driver missing | **Unresolved — see Issue 19** |
-| Client DNS configuration | Not started — blocked by the adapter | Pending |
-| Domain join | Not started — blocked by the adapter | Pending |
+| Windows 11 ARM client VM | `WIN11-CLIENT01` — UTM Virtualize mode, ARM64, NIC `virtio-net-pci` | Rebuilt from scratch; installed and booting from disk |
+| Client network adapter | Red Hat VirtIO Ethernet Adapter | Confirmed working — DHCP IPv4 `192.168.64.4`, gateway and DNS present |
+| Client DNS configuration | Must be repointed to DC01 (`192.168.64.10`) | **Next step** — DHCP-issued DNS cannot resolve AD SRV records |
+| Domain join | Not started — blocked by client DNS | Pending |
 
 ---
 
@@ -564,9 +777,9 @@ configuration and the domain join are both blocked until the adapter appears.
 4. ~~Build OU structure: IT, HR, Finance, Contractors~~ — done (see [`../scripts/new-ou-structure.ps1`](../scripts/new-ou-structure.ps1))
 5. ~~Create 10+ user accounts and security groups (`IT-Admins`, `HR-Staff`, `VPN-Users`)~~ — done (see [`../scripts/new-users-and-groups.ps1`](../scripts/new-users-and-groups.ps1))
 6. ~~Configure 3 GPOs (password policy, screen lock, USB restriction on Contractors OU)~~ — done, verified on DC01
-7. ~~Create Windows 11 ARM client VM~~ — built and installed as `WIN11-CLIENT01`
-8. **Install the client's network adapter driver** — in progress, see Issue 19
-9. Configure client DNS to point at DC01 (`192.168.64.10`) — blocked by step 8
+7. ~~Create Windows 11 ARM client VM~~ — rebuilt from scratch as `WIN11-CLIENT01` with `virtio-net-pci` set before install
+8. ~~Install the client's network adapter driver~~ — done, Red Hat VirtIO Ethernet Adapter bound automatically (Issue 24)
+9. **Configure client DNS to point at DC01 (`192.168.64.10`)** — next step; DHCP-issued DNS will not resolve the AD SRV records needed to locate the domain
 10. Join `WIN11-CLIENT01` to `corp.local` and verify domain login — blocked by step 9
 11. Verify GPOs applying with `gpresult /r` on the client
 12. Practice AD user lifecycle operations: password reset, disable/enable, move between OUs

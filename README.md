@@ -100,10 +100,10 @@ users, groups, and Group Policy.
 
 - [ ] Practice AD user lifecycle operations: password reset, disable/enable, move between OUs (disabled accounts `sjohnson` and `kpark` are staged for this)
 - [ ] **Windows 11 ARM64 client (`WIN11-CLIENT01`) — in progress:**
-  - [x] VM created in UTM using **Virtualize** mode (native ARM64, no x86 emulation needed)
+  - [x] VM built in UTM using **Virtualize** mode (native ARM64, no x86 emulation needed), with the NIC set to `virtio-net-pci` before install
   - [x] Windows 11 Enterprise ARM64 installed, booting from disk
-  - [ ] Network adapter driver — **currently blocked**, no adapter detected (see troubleshooting log Issue 19)
-  - [ ] Configure client DNS to point at DC01 (`192.168.64.10`) — blocked by the adapter
+  - [x] Network adapter working — Red Hat VirtIO Ethernet Adapter bound automatically by UTM Guest Tools; DHCP IPv4 `192.168.64.4` with gateway and DNS confirmed via `ipconfig /all`
+  - [ ] **Point the client's DNS at DC01 (`192.168.64.10`)** — DHCP-issued DNS cannot resolve the AD SRV records needed to locate the domain
   - [ ] Join to `corp.local` and verify end-to-end domain login — blocked by DNS
   - [ ] Verify the Screen Lock and USB Block GPOs apply on the client with `gpresult /r`
 
