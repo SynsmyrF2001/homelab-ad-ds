@@ -95,15 +95,25 @@ users, groups, and Group Policy.
   - **Screen Lock Policy** — `Interactive logon: Machine inactivity limit` = 600s — linked to `IT`, `HR`, `Finance`, `Contractors`
   - **USB Block Policy** — Removable Storage Access denied — linked to `Contractors` **only**
 - [x] GPO application verified on DC01 with `gpresult /r`
-- [x] Windows 11 ARM64 client (`WIN11-CLIENT01`) built in UTM **Virtualize** mode, with the NIC set to `virtio-net-pci` before install
+- [x] Windows 11 ARM64 client (`WIN-NSHG0FCOL9Q`) built in UTM **Virtualize** mode, with the NIC set to `virtio-net-pci` before install
 - [x] Client network adapter working — Red Hat VirtIO Ethernet Adapter bound automatically by UTM Guest Tools
 - [x] Client DNS pointed at DC01 (`192.168.64.10`) — required disabling IPv6 on the adapter to stop an auto-discovered IPv6 resolver from answering first
-- [x] **`WIN11-CLIENT01` joined to `corp.local`** via `Add-Computer`, verified end to end: `whoami` returns `corp\administrator`, `(Get-WmiObject Win32_ComputerSystem).Domain` returns `corp.local`, and `.PartOfDomain` returns `True`
+- [x] **`WIN-NSHG0FCOL9Q` joined to `corp.local`** via `Add-Computer`, verified end to end: `whoami` returns `corp\administrator`, `(Get-WmiObject Win32_ComputerSystem).Domain` returns `corp.local`, and `.PartOfDomain` returns `True`
+
+> **Note on the client hostname.** `WIN-NSHG0FCOL9Q` is the name Windows generated
+> automatically during installation — it is the machine's real hostname, not a chosen
+> one. Renaming it to `WIN11-CLIENT01` to match this document's original naming was
+> attempted and then **deliberately abandoned**: the attempt surfaced an orphaned AD
+> computer object flagged internally as a domain controller account, left behind by an
+> earlier abandoned build of this VM, and safely clearing it would have meant
+> `ntdsutil` metadata cleanup or direct `userAccountControl` edits — more risk than a
+> cosmetic hostname mismatch justified. Full write-up in
+> [Issue 28](docs/troubleshooting-log.md) of the troubleshooting log.
 
 ## In Progress / Next Steps
 
 - [ ] Practice AD user lifecycle operations: password reset, disable/enable, move between OUs (disabled accounts `sjohnson` and `kpark` are staged for this)
-- [ ] Verify the Screen Lock and USB Block GPOs apply on `WIN11-CLIENT01` with `gpresult /r` — both target workstations, so DC01 alone cannot demonstrate them taking effect
+- [ ] Verify the Screen Lock and USB Block GPOs apply on `WIN-NSHG0FCOL9Q` with `gpresult /r` — both target workstations, so DC01 alone cannot demonstrate them taking effect
 
 ---
 

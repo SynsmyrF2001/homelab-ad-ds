@@ -35,6 +35,38 @@ TEMPLATE — copy this block, fill it in, and paste it directly beneath the
 
 ## 2026-09-03
 
+**The client keeps its real hostname.** An attempt to rename the domain-joined client
+from its Windows-assigned name to `WIN11-CLIENT01`, purely to match the documentation,
+uncovered stale directory metadata from an earlier abandoned VM build. The rename was
+deliberately abandoned and the documentation was corrected to match the machine instead.
+
+### Changed
+- **`README.md` now uses the client's actual hostname, `WIN-NSHG0FCOL9Q`, throughout** —
+  VM description, milestone checklist, and the pending client-side GPO verification step.
+  The docs previously referred to the client as `WIN11-CLIENT01`, which was the intended
+  name, never the real one.
+- Added a note beside the client's details in `README.md` recording that
+  `WIN-NSHG0FCOL9Q` is the Windows-generated default rather than a chosen name, and that
+  renaming it was attempted and abandoned on purpose.
+
+### Added
+- **Troubleshooting log Issue 28** — the full write-up of the rename attempt, the
+  orphaned AD object it exposed, and the reasoning behind stopping.
+
+### Decisions
+- **Abandoned the client rename.** `Rename-Computer` failed with "The account already
+  exists"; the blocking object turned out to be an orphaned `WIN11-CLIENT01` account
+  flagged internally as a **domain controller**, sitting in the Domain Controllers OU
+  with a creation date from the original pre-rebuild client VM — left behind when that
+  build was promoted (or partially promoted) as a second DC before being scrapped during
+  the Issue 19–23 network/boot failures. Neither `Remove-ADComputer` nor ADUC would
+  delete it, since it was never a properly promoted, demotable DC.
+- **Did not pursue `ntdsutil` metadata cleanup or a direct `userAccountControl` edit.**
+  Both would likely have worked, but editing forest metadata to fix a cosmetic naming
+  mismatch is a poor risk trade in a working single-DC forest.
+- The orphaned `WIN11-CLIENT01` object stays in AD as a **known, documented artifact** —
+  no privileges, no replication role, no effect on DC01's FSMO roles.
+
 **Step 5 is complete.** `WIN11-CLIENT01` is joined to the `corp.local` domain and
 verified end to end — DNS resolution, machine trust, and domain-credential login all
 confirmed working.
