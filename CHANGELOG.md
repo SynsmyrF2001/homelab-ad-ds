@@ -33,6 +33,61 @@ TEMPLATE — copy this block, fill it in, and paste it directly beneath the
 
 ---
 
+## 2026-09-03
+
+**Step 5 is complete.** `WIN11-CLIENT01` is joined to the `corp.local` domain and
+verified end to end — DNS resolution, machine trust, and domain-credential login all
+confirmed working.
+
+### Fixed
+- **IPv6 DNS conflict (Issue 25).** After pointing the client's DNS at DC01,
+  `nslookup corp.local` still returned "Non-existent domain" — because the query was
+  going to a link-local IPv6 resolver (`fe80::...`), not to `192.168.64.10`.
+  `Set-DnsClientServerAddress` manages only the IPv4 DNS list, while UTM's virtual
+  network advertises an IPv6 DNS server via Router Advertisement RDNSS that Windows
+  learns automatically and prefers. Resolved with
+  `Disable-NetAdapterBinding -InterfaceAlias "Ethernet" -ComponentID ms_tcpip6`,
+  after which `nslookup` resolved correctly against DC01.
+- **Credential prompt failure (Issue 26).** `Add-Computer ... -Credential (Get-Credential)`
+  failed because CredUI could not render its dialog in the VM console; passing a
+  plain username string failed identically, since that path calls `Get-Credential`
+  internally too. Resolved by building the `PSCredential` manually with
+  `Read-Host -AsSecureString` plus
+  `New-Object System.Management.Automation.PSCredential`, avoiding any GUI dependency.
+
+### Added
+- **`WIN11-CLIENT01` joined to `corp.local`** via
+  `Add-Computer -DomainName "corp.local" -Credential $cred -Restart`.
+- Troubleshooting log Issues 25–27 documenting the DNS conflict, the credential
+  failure, and the verified join.
+
+### Verified
+- Logged in with domain credentials as `CORP\Administrator` — an account distinct
+  from the local `localadmin`, so the login itself is a meaningful test.
+- `whoami` → `corp\administrator` (user authenticated against the domain).
+- `(Get-WmiObject Win32_ComputerSystem).Domain` → `corp.local` (machine membership).
+- `(Get-WmiObject Win32_ComputerSystem).PartOfDomain` → `True` (joined to a domain,
+  not a workgroup with a matching name).
+- Together these confirm the full chain end to end: DNS resolution located the domain
+  controller, the machine's secure-channel trust is established, and Kerberos user
+  authentication succeeds.
+
+### Changed
+- Promoted the completed client work into the README's Milestones Completed list;
+  the remaining open items are client-side GPO verification and AD user lifecycle
+  practice.
+- Refreshed the troubleshooting log's status header, configuration table, and
+  next-steps list.
+
+### Next
+- Run `gpresult /r` on `WIN11-CLIENT01` to confirm the Screen Lock and USB Block GPOs
+  actually take effect — both target workstations, so DC01 alone cannot demonstrate
+  them.
+- Practise AD user lifecycle operations — password reset, enable/disable, and moving
+  accounts between OUs — starting with `sjohnson` and `kpark`.
+
+---
+
 ## 2026-09-02
 
 Step 5 milestone — the client VM's network adapter is fully working after an
