@@ -899,6 +899,88 @@ established, and **Kerberos user authentication** succeeds.
 
 ---
 
+### Issue 28 — Client rename attempt left behind an orphaned domain-controller-flagged AD object
+
+**What happened:**
+The client was still running its Windows-assigned hostname, `WIN-NSHG0FCOL9Q`, while
+this documentation referred to it throughout as `WIN11-CLIENT01`. Renaming the machine
+to close that gap failed repeatedly:
+
+```powershell
+Rename-Computer -NewName "WIN11-CLIENT01" -Restart
+```
+
+The first attempt ran without an explicit `-DomainCredential` and got partway through.
+A rename on a **domain-joined** machine is a two-phase operation: first a new computer
+account is created in AD under the target name, then the local machine identity is
+updated and the machine reboots into it. The run was interrupted before the second
+phase completed, so the local hostname never changed — but the new AD object had
+already been created.
+
+Every subsequent attempt then failed with:
+
+```
+The account already exists.
+```
+
+Investigating that leftover object turned up something unexpected. The orphaned
+`WIN11-CLIENT01` account was flagged internally as a **domain controller account**
+rather than a normal workstation, it was sitting in the **Domain Controllers** OU, and
+its creation timestamp dated back to the *original, pre-rebuild* client VM — the build
+that was scrapped after the network driver and boot corruption problems documented in
+Issues 19–23. That earlier abandoned VM had evidently been promoted, or partially
+promoted, as a second domain controller under the same intended name before it was
+discarded.
+
+Because the object was typed as a DC account with no real server behind it, the normal
+cleanup paths both refused:
+
+- `Remove-ADComputer` threw a generic internal error regardless of the object's
+  location or whether accidental-deletion protection was cleared.
+- Active Directory Users and Computers declined to force-delete it through its live
+  snap-in connection, because the object was never a properly promoted, demotable
+  domain controller.
+
+**Root cause:**
+An interrupted domain-join/rename operation on an earlier, already-abandoned VM build
+left dead directory metadata behind, flagged with the wrong account type for the object
+it actually represented. The blocking error (`The account already exists`) was accurate;
+what made it stubborn was that the pre-existing account was the wrong *kind* of object,
+which put it outside the reach of the standard workstation-cleanup tooling.
+
+**Resolution:**
+The remaining routes forward were `ntdsutil` metadata cleanup or a direct
+`userAccountControl` edit on the object. Both are legitimate fixes, but both operate
+directly on forest metadata — disproportionate risk for what is ultimately a cosmetic
+hostname mismatch. **The rename was abandoned instead.**
+
+The working client keeps its Windows-assigned hostname, `WIN-NSHG0FCOL9Q`, and
+[`../README.md`](../README.md) has been updated to use that name throughout so the
+documentation matches reality rather than intent. The orphaned `WIN11-CLIENT01` object
+remains in AD, undisturbed: it holds no privileges, takes no part in replication, and
+has no effect on DC01's FSMO roles. It is recorded here as a **known artifact**, not as
+outstanding work.
+
+**Status: ACCEPTED, not resolved — by design.**
+
+**What I learned:**
+- **A domain-joined rename is two operations, not one.** Creating the AD account and
+  switching the local machine identity are separate phases, and an interruption between
+  them leaves the directory ahead of the machine — with the half-finished state blocking
+  every retry.
+- **"The account already exists" is a starting point, not a conclusion.** Reading the
+  blocking object's actual attributes is what turned a naming collision into the real
+  finding: stale DC metadata from a VM that no longer exists.
+- **Abandoned lab builds leave residue in the directory.** Deleting a VM does not delete
+  what it registered in AD. A build scrapped weeks earlier was still shaping what was
+  possible today.
+- **Knowing when to stop is part of the skill.** `ntdsutil` metadata cleanup was
+  available and would probably have worked. Choosing not to run it against a healthy
+  single-DC forest to fix a naming inconsistency — and documenting that choice — is a
+  sounder call than proving the tool can be driven.
+
+---
+
 ## Current configuration state
 
 | Setting | Value | Status |
