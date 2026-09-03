@@ -3,7 +3,7 @@
 **Project:** Windows Server AD DS homelab on Apple Silicon MacBook Pro
 **Environment:** UTM (x86 emulation) on M-series Mac
 **Date:** August 2026
-**Status:** In progress — DC01 fully built: forest promoted, OUs, users, groups and GPOs all in place. Client VM `WIN11-CLIENT01` rebuilt from scratch and fully networked (Issue 24). Remaining: point the client's DNS at DC01, then join it to `corp.local`.
+**Status:** Core build complete — DC01 promoted with OUs, users, groups and GPOs in place, and `WIN11-CLIENT01` joined to `corp.local` and verified end to end (Issue 27). Remaining: confirm the Screen Lock and USB Block GPOs apply on the client, and practise AD user lifecycle operations.
 
 > For the authoritative current-state summary (VM specs, network settings, domain
 > details, milestone checklist), see [`../README.md`](../README.md). This document is
@@ -744,6 +744,161 @@ internet connectivity works fine.
 
 ---
 
+### Issue 25 — DNS query hijacked by an auto-discovered IPv6 DNS server, despite correct IPv4 configuration
+
+**What happened:**
+After pointing the client at DC01 with
+
+```powershell
+Set-DnsClientServerAddress -InterfaceAlias "Ethernet" -ServerAddresses 192.168.64.10
+```
+
+`nslookup corp.local` still failed with **"Non-existent domain."**
+
+**How it was caught:**
+The `Server:` / `Address:` lines in the `nslookup` output. Instead of reporting
+`192.168.64.10`, they showed a **link-local IPv6 address** (`fe80::...`) — the query
+had never gone to DC01 at all.
+
+**Root cause:**
+`Set-DnsClientServerAddress` manages only the **IPv4** DNS server list for an adapter.
+Meanwhile UTM's virtual network sends IPv6 **Router Advertisements** carrying an
+**RDNSS** (Recursive DNS Server) option, which Windows learns automatically and uses
+alongside the manually configured IPv4 server. That auto-discovered IPv6 resolver is
+UTM's virtual router, which has no knowledge of `corp.local` — so it answered the
+query authoritatively wrong.
+
+The IPv4 configuration was correct the entire time. It simply was not the
+configuration being consulted.
+
+**Resolution:**
+Disabled IPv6 on the adapter entirely, removing the competing resolver:
+
+```powershell
+Disable-NetAdapterBinding -InterfaceAlias "Ethernet" -ComponentID ms_tcpip6
+```
+
+Re-running `nslookup corp.local` then resolved correctly against `192.168.64.10`.
+
+**What I learned:**
+- **Windows prefers IPv6 over IPv4 by default.** Configuring IPv4 DNS correctly does
+  not guarantee it will be used if an IPv6 resolver is also present.
+- Always read `nslookup`'s `Server:` line before interpreting its answer. "Non-existent
+  domain" from the *wrong* server is a completely different problem from the same
+  answer from the *right* one — and only that line distinguishes them.
+- RDNSS means a network can hand a host a DNS server via IPv6 Router Advertisements
+  without any DHCP involvement, which is why this resolver never appeared in the IPv4
+  configuration being inspected.
+- Disabling IPv6 is acceptable in this lab. In production it is a blunt instrument —
+  the better fix is usually configuring the IPv6 DNS server correctly, or stopping the
+  RA from advertising one, rather than turning off the protocol.
+
+---
+
+### Issue 26 — `Get-Credential` failed to prompt in the VM console, blocking the domain join
+
+**What happened:**
+Running the domain join failed immediately:
+
+```powershell
+Add-Computer -DomainName "corp.local" -Credential (Get-Credential) -Restart
+```
+
+```
+Get-Credential : Cannot process command because of one or more missing mandatory
+parameters: Credential.
+```
+
+Passing a plain username string instead (`-Credential CORP\Administrator`) also
+failed, with `Add-Computer` reporting the Credential argument was null or empty.
+
+**Root cause:**
+`Get-Credential` depends on Windows' **CredUI** subsystem to render its
+username/password dialog, and that dialog failed to render in this VM's console
+session. The second approach hit the *same* underlying failure rather than a
+different one: `Add-Computer`'s automatic conversion of a username string into a
+`PSCredential` calls `Get-Credential` internally.
+
+**Resolution:**
+Bypassed CredUI entirely by constructing the `PSCredential` object manually —
+`Read-Host -AsSecureString` gives a pure console password prompt with no GUI
+dependency:
+
+```powershell
+$username = "CORP\Administrator"
+$password = Read-Host -AsSecureString
+$cred = New-Object System.Management.Automation.PSCredential($username, $password)
+
+Add-Computer -DomainName "corp.local" -Credential $cred -Restart
+```
+
+The manually built credential object worked correctly.
+
+One detour on the way: the first attempt threw a "Cannot find type" error from a
+typo — `System.Managment` instead of `System.Management`.
+
+**What I learned:**
+- **Two different commands failing identically is a clue, not a coincidence.** Both
+  paths routed through `Get-Credential`, so the second attempt was never an
+  independent test of the problem.
+- `Read-Host -AsSecureString` is the reliable console fallback whenever a GUI
+  credential prompt is unavailable — Server Core, SSH sessions, and constrained VM
+  consoles all hit this.
+- `PSCredential` needs a plain-text username and a `SecureString` password, in that
+  order. Knowing how to build one by hand means never being blocked by a
+  non-rendering prompt.
+- "Cannot find type" is a .NET type-name error, distinct from a PowerShell cmdlet
+  error — it points at spelling in the fully-qualified type name rather than at
+  syntax.
+
+---
+
+### Issue 27 — Domain join succeeded: verified end-to-end, not assumed from a lack of errors ✅
+
+**What happened:**
+With DNS resolving correctly (Issue 25) and a working credential object (Issue 26),
+the join completed and the client rebooted:
+
+```powershell
+Add-Computer -DomainName "corp.local" -Credential $cred -Restart
+```
+
+The post-reboot lock screen still defaulted to the local `localadmin` account. This
+is **expected and not a failure signal**: Windows shows the last interactive user
+regardless of join outcome, and the PowerShell method does not display the GUI
+"Welcome to the domain" confirmation that `sysdm.cpl` shows.
+
+**Resolution / verification:**
+Because the absence of an error is not evidence of success, membership was verified
+explicitly. Logged in as `CORP\Administrator` — a **distinct account** from
+`localadmin`, so a successful login is itself meaningful — then confirmed:
+
+| Check | Result | What it proves |
+|---|---|---|
+| `whoami` | `corp\administrator` | The session is authenticated as a **domain** account, not a local one |
+| `(Get-WmiObject Win32_ComputerSystem).Domain` | `corp.local` | The machine's domain membership as the OS itself reports it |
+| `(Get-WmiObject Win32_ComputerSystem).PartOfDomain` | `True` | Explicit boolean: joined to a domain, not merely in a workgroup with a matching name |
+
+Together these confirm the whole chain is working: **DNS resolution** located the
+domain controller, the **machine's secure-channel trust** with the domain is
+established, and **Kerberos user authentication** succeeds.
+
+**Status: RESOLVED. Step 5 is complete.**
+
+**What I learned:**
+- **"No error" is not verification.** `Add-Computer` completing silently and the
+  machine rebooting proves the command ran, not that the join took effect. The three
+  checks above test the actual end state.
+- Each check covers a different layer, which is why all three matter: `whoami` proves
+  *user* authentication, `.Domain` and `.PartOfDomain` prove *machine* membership. A
+  machine can be joined while a user login still fails, and vice versa.
+- `.Domain` alone is insufficient — a workgroup can be named `corp.local`. `.PartOfDomain`
+  is what distinguishes real membership from a coincidentally matching name.
+- Logging in with an account that exists **only** in the domain is itself a test. Had
+  the join silently failed, `CORP\Administrator` would not have authenticated at all.
+
+---
+
 ## Current configuration state
 
 | Setting | Value | Status |
@@ -764,8 +919,9 @@ internet connectivity works fine.
 | GPOs | Password Policy (domain root), Screen Lock (IT/HR/Finance/Contractors), USB Block (Contractors) | Linked; confirmed on DC01 via `gpresult /r` |
 | Windows 11 ARM client VM | `WIN11-CLIENT01` — UTM Virtualize mode, ARM64, NIC `virtio-net-pci` | Rebuilt from scratch; installed and booting from disk |
 | Client network adapter | Red Hat VirtIO Ethernet Adapter | Confirmed working — DHCP IPv4 `192.168.64.4`, gateway and DNS present |
-| Client DNS configuration | Must be repointed to DC01 (`192.168.64.10`) | **Next step** — DHCP-issued DNS cannot resolve AD SRV records |
-| Domain join | Not started — blocked by client DNS | Pending |
+| Client DNS configuration | `192.168.64.10` (DC01); IPv6 disabled on the adapter | Confirmed — `nslookup corp.local` resolves against DC01 |
+| Domain join | `WIN11-CLIENT01` joined to `corp.local` | Confirmed — `whoami` = `corp\administrator`, `.Domain` = `corp.local`, `.PartOfDomain` = `True` |
+| Client GPO application | Screen Lock and USB Block not yet checked on the client | Pending — `gpresult /r` on `WIN11-CLIENT01` |
 
 ---
 
@@ -779,9 +935,9 @@ internet connectivity works fine.
 6. ~~Configure 3 GPOs (password policy, screen lock, USB restriction on Contractors OU)~~ — done, verified on DC01
 7. ~~Create Windows 11 ARM client VM~~ — rebuilt from scratch as `WIN11-CLIENT01` with `virtio-net-pci` set before install
 8. ~~Install the client's network adapter driver~~ — done, Red Hat VirtIO Ethernet Adapter bound automatically (Issue 24)
-9. **Configure client DNS to point at DC01 (`192.168.64.10`)** — next step; DHCP-issued DNS will not resolve the AD SRV records needed to locate the domain
-10. Join `WIN11-CLIENT01` to `corp.local` and verify domain login — blocked by step 9
-11. Verify GPOs applying with `gpresult /r` on the client
+9. ~~Configure client DNS to point at DC01 (`192.168.64.10`)~~ — done; required disabling IPv6 on the adapter (Issue 25)
+10. ~~Join `WIN11-CLIENT01` to `corp.local` and verify domain login~~ — done and verified end to end (Issue 27)
+11. **Verify GPOs applying with `gpresult /r` on the client** — next step; the Screen Lock and USB Block policies target workstations and have only been confirmed on DC01 so far
 12. Practice AD user lifecycle operations: password reset, disable/enable, move between OUs
 
 ---

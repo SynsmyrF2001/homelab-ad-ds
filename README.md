@@ -95,17 +95,15 @@ users, groups, and Group Policy.
   - **Screen Lock Policy** — `Interactive logon: Machine inactivity limit` = 600s — linked to `IT`, `HR`, `Finance`, `Contractors`
   - **USB Block Policy** — Removable Storage Access denied — linked to `Contractors` **only**
 - [x] GPO application verified on DC01 with `gpresult /r`
+- [x] Windows 11 ARM64 client (`WIN11-CLIENT01`) built in UTM **Virtualize** mode, with the NIC set to `virtio-net-pci` before install
+- [x] Client network adapter working — Red Hat VirtIO Ethernet Adapter bound automatically by UTM Guest Tools
+- [x] Client DNS pointed at DC01 (`192.168.64.10`) — required disabling IPv6 on the adapter to stop an auto-discovered IPv6 resolver from answering first
+- [x] **`WIN11-CLIENT01` joined to `corp.local`** via `Add-Computer`, verified end to end: `whoami` returns `corp\administrator`, `(Get-WmiObject Win32_ComputerSystem).Domain` returns `corp.local`, and `.PartOfDomain` returns `True`
 
 ## In Progress / Next Steps
 
 - [ ] Practice AD user lifecycle operations: password reset, disable/enable, move between OUs (disabled accounts `sjohnson` and `kpark` are staged for this)
-- [ ] **Windows 11 ARM64 client (`WIN11-CLIENT01`) — in progress:**
-  - [x] VM built in UTM using **Virtualize** mode (native ARM64, no x86 emulation needed), with the NIC set to `virtio-net-pci` before install
-  - [x] Windows 11 Enterprise ARM64 installed, booting from disk
-  - [x] Network adapter working — Red Hat VirtIO Ethernet Adapter bound automatically by UTM Guest Tools; DHCP IPv4 `192.168.64.4` with gateway and DNS confirmed via `ipconfig /all`
-  - [ ] **Point the client's DNS at DC01 (`192.168.64.10`)** — DHCP-issued DNS cannot resolve the AD SRV records needed to locate the domain
-  - [ ] Join to `corp.local` and verify end-to-end domain login — blocked by DNS
-  - [ ] Verify the Screen Lock and USB Block GPOs apply on the client with `gpresult /r`
+- [ ] Verify the Screen Lock and USB Block GPOs apply on `WIN11-CLIENT01` with `gpresult /r` — both target workstations, so DC01 alone cannot demonstrate them taking effect
 
 ---
 
