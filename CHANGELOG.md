@@ -35,6 +35,46 @@ TEMPLATE — copy this block, fill it in, and paste it directly beneath the
 
 ## 2026-09-03
 
+**Both remaining open items are done.** The Screen Lock and USB Block GPOs are confirmed
+applying on the Windows 11 client, and the AD user lifecycle drills are complete. The
+README's *In Progress / Next Steps* list is now empty.
+
+### Verified
+- **Screen Lock Policy and USB Block Policy apply on the client**, confirmed with
+  `gpresult /r` — both now listed under *Applied Group Policy Objects* alongside the
+  domain-root-linked policies. This closes the gap noted previously: both GPOs target
+  workstations, so verifying them on DC01 alone proved nothing about the client.
+- **The domain Password Policy GPO is enforced on administrative resets, not just
+  user-initiated changes.** Setting a short password through `Set-ADAccountPassword -Reset`
+  was rejected until it met the 12-character minimum and complexity requirement — useful
+  to know, since it is easy to assume an admin reset bypasses domain policy.
+
+### Fixed
+- **Client computer object was in the wrong place to receive OU-linked policy.** After the
+  domain join the client landed in the default `Computers` container, which is a container
+  rather than an OU — so the Screen Lock and USB Block GPOs, both linked to specific OUs,
+  never reached it. Moving the computer object into the `Contractors` OU resolved it, and
+  the policies applied on the next refresh.
+
+### Added
+- **`Disabled Accounts` OU**, created at the domain root as the archival target for
+  offboarded accounts.
+- **AD user lifecycle practice completed** against the two fixture accounts:
+  - `sjohnson` — password reset via `Set-ADAccountPassword -Reset` (the admin path, which
+    needs no prior password), flagged for a mandatory change at next logon with
+    `-ChangePasswordAtLogon $true`, then re-enabled with `Enable-ADAccount`.
+  - `kpark` — moved into the new `Disabled Accounts` OU and confirmed disabled with
+    `Disable-ADAccount`, simulating an offboarding/archival workflow.
+
+### Changed
+- `README.md` — the two completed items moved from *In Progress / Next Steps* into
+  *Milestones Completed*, and the OU structure line now includes `Disabled Accounts`,
+  which did not exist when that line was first written.
+
+---
+
+## 2026-09-03
+
 **The client keeps its real hostname.** An attempt to rename the domain-joined client
 from its Windows-assigned name to `WIN11-CLIENT01`, purely to match the documentation,
 uncovered stale directory metadata from an earlier abandoned VM build. The rename was

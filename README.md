@@ -86,7 +86,7 @@ users, groups, and Group Policy.
 - [x] AD DS role installed (`Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools`)
 - [x] Promoted to domain controller for a new forest (`Install-ADDSForest`) — domain `corp.local`, NetBIOS `CORP`
 - [x] Promotion verified via `Get-ADDomain` and `Get-ADDomainController`
-- [x] OU structure created: `IT` (with `Admins` and `Helpdesk` sub-OUs), `HR`, `Finance`, `Contractors`
+- [x] OU structure created: `IT` (with `Admins` and `Helpdesk` sub-OUs), `HR`, `Finance`, `Contractors`, and `Disabled Accounts` (created later at the **domain root**, during the account-lifecycle practice below)
 - [x] Security groups created: `IT-Admins`, `HR-Staff`, `VPN-Users`
 - [x] 10 user accounts created and distributed across the `IT/Admins`, `IT/Helpdesk`, `HR`, `Finance`, and `Contractors` OUs — two (`sjohnson`, `kpark`) intentionally left disabled as fixtures for account-lifecycle practice
 - [x] User placement and group membership verified via `Get-ADUser` and `Get-ADGroupMember`
@@ -99,6 +99,10 @@ users, groups, and Group Policy.
 - [x] Client network adapter working — Red Hat VirtIO Ethernet Adapter bound automatically by UTM Guest Tools
 - [x] Client DNS pointed at DC01 (`192.168.64.10`) — required disabling IPv6 on the adapter to stop an auto-discovered IPv6 resolver from answering first
 - [x] **`WIN-NSHG0FCOL9Q` joined to `corp.local`** via `Add-Computer`, verified end to end: `whoami` returns `corp\administrator`, `(Get-WmiObject Win32_ComputerSystem).Domain` returns `corp.local`, and `.PartOfDomain` returns `True`
+- [x] **GPO application verified on the Windows 11 client** with `gpresult /r` — this first required **moving the client's computer object out of the default `Computers` container into the `Contractors` OU**: newly joined machines land in `Computers`, which is a container rather than an OU, so GPOs linked to specific OUs never reach it. After the move, both **Screen Lock Policy** and **USB Block Policy** appeared under *Applied Group Policy Objects* alongside the domain-root-linked policies
+- [x] **AD user lifecycle operations practiced** on the two fixture accounts:
+  - **`sjohnson`** — password reset with `Set-ADAccountPassword -Reset` (the administrative reset path, which requires no knowledge of the old password), flagged for a mandatory change at next logon with `-ChangePasswordAtLogon $true`, then re-enabled with `Enable-ADAccount`
+  - **`kpark`** — moved into a newly created **`Disabled Accounts`** OU and confirmed disabled with `Disable-ADAccount`, simulating an offboarding/archival workflow
 
 > **Note on the client hostname.** `WIN-NSHG0FCOL9Q` is the name Windows generated
 > automatically during installation — it is the machine's real hostname, not a chosen
@@ -112,8 +116,8 @@ users, groups, and Group Policy.
 
 ## In Progress / Next Steps
 
-- [ ] Practice AD user lifecycle operations: password reset, disable/enable, move between OUs (disabled accounts `sjohnson` and `kpark` are staged for this)
-- [ ] Verify the Screen Lock and USB Block GPOs apply on `WIN-NSHG0FCOL9Q` with `gpresult /r` — both target workstations, so DC01 alone cannot demonstrate them taking effect
+No open items — both previously tracked steps (client-side GPO verification and AD user
+lifecycle practice) are complete and now recorded under *Milestones Completed* above.
 
 ---
 
