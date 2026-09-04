@@ -981,6 +981,158 @@ outstanding work.
 
 ---
 
+### Issue 29 — RSAT reported a successful install on the client, but the tools were never present
+
+**What happened:**
+The plan was to test `jsmith`'s delegated permissions from the Windows 11 client rather
+than from the domain controller, which meant installing the AD RSAT tools there first:
+
+```powershell
+Add-WindowsCapability -Online -Name "Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0"
+```
+
+The command returned `Online: True`, `RestartNeeded: False` — every sign of a clean
+success. Nothing it should have installed actually worked:
+
+- `Get-Module -ListAvailable ActiveDirectory` returned nothing at all.
+- `Import-Module ActiveDirectory` failed with *"no valid module file was found in any
+  module directory."*
+- `dsa.msc` was not recognised as a command.
+
+**Root cause:**
+Querying the capability directly told a different story than the install had:
+
+```powershell
+Get-WindowsCapability -Online -Name "Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0"
+```
+
+Its actual `State` was **`NotPresent`**, with `DownloadSize: 0` and `InstallSize: 0` — the
+signature of a Feature-on-Demand package that is simply not published for this client's OS
+build through Windows Update. Connectivity was ruled out separately:
+`Test-NetConnection -ComputerName download.windowsupdate.com -Port 443` confirmed the
+client could reach Windows Update fine. This client runs a **Windows 11 ARM64 Insider
+Preview** build, and while the RSAT FOD catalogue is reliably available for mainstream x64
+Windows 10/11, it can be incomplete for ARM64 and Insider channels. A zero-byte package
+cannot install, and `Add-WindowsCapability` reported success on having nothing to do.
+
+**Resolution:**
+Rather than chase a package that may not exist for this build, installing RSAT on the
+client was abandoned entirely. All delegation verification was run **directly from DC01**,
+which already carries the full AD DS toolset natively as the domain controller — the same
+tests, from a host that was never missing the tooling.
+
+**Status: ACCEPTED, not resolved — by design.** Parked the same way the client hostname
+rename was in Issue 28 above.
+
+---
+
+### Issue 30 — `runas /netonly` silently failed to apply the alternate identity, invalidating a full round of tests
+
+**What happened:**
+Regular domain users are blocked by default from logging on interactively to a domain
+controller, so testing `jsmith`'s delegated rights on DC01 called for an alternate
+identity rather than a second login:
+
+```powershell
+runas /netonly /user:CORP\jsmith powershell
+```
+
+`/netonly` is meant to authenticate as the supplied account for any **network** operation
+— which is what an AD query is — while leaving the local session's identity in place for
+everything else. Inside that window, every AD operation succeeded, **including a password
+reset against a user in the deliberately excluded `IT/Admins` OU**. That is the exact
+opposite of the expected result: the test that was supposed to be denied passed.
+
+Two plausible causes were checked before doubting the shell itself:
+
+- **An unintended inherited ACE** — whether `IT-Admins` had picked up rights on the
+  excluded OU by inheritance from the parent `IT` OU:
+  `dsacls "OU=IT,DC=corp,DC=local" | Select-String "IT-Admins"` returned **no matches**.
+- **Unintended privileged group membership** — whether `jsmith` or `mgarcia` had landed in
+  something like `Account Operators`: `Get-ADPrincipalGroupMembership` came back clean for
+  both, showing only `Domain Users`, `IT-Admins`, and `VPN-Users`.
+
+Both were ruled out. A decisive test settled it — creating an OU at the domain root from
+inside the `/netonly` window:
+
+```powershell
+New-ADOrganizationalUnit -Name "TEST-DELEGATION-CHECK" -Path "DC=corp,DC=local"
+```
+
+It **succeeded** — an operation a plain domain user should never be able to perform under
+any circumstance.
+
+**Root cause:**
+That success proved the window had been running as **Administrator** the entire time.
+`/netonly`'s credential substitution never took effect for the ActiveDirectory PowerShell
+module's connection — a known rough edge when that module is run directly on a domain
+controller, where it defaults to the session's integrated Windows token instead of the
+alternate network credentials. Every "pass" from that round of testing was the local
+administrator's rights, not `jsmith`'s.
+
+**Resolution:**
+Abandoned `/netonly` and switched to passing an explicit `-Credential` object on each
+individual AD cmdlet call, built by hand:
+
+```powershell
+$pw   = Read-Host "Password" -AsSecureString
+$cred = New-Object System.Management.Automation.PSCredential("CORP\jsmith", $pw)
+```
+
+Supplying the credential per-operation forces the identity unambiguously and sidesteps the
+issue entirely. The test OU was removed once the cause was confirmed — clearing
+`-ProtectedFromAccidentalDeletion` first, then `Remove-ADOrganizationalUnit`.
+
+---
+
+### Issue 31 — A self-referential permission test produced a misleading "pass"
+
+**What happened:**
+Before switching the target to `mgarcia`, delegation was first tested by having `jsmith`
+reset **`jsmith`'s own** password. It succeeded — and that result proved nothing.
+
+**Root cause:**
+Every AD user object carries a built-in **`SELF`** security principal with its own default
+*Change Password* right, independent of any OU-level delegation. A user resetting their own
+password exercises that built-in right, not whatever was explicitly delegated to their
+group. The underlying error was conflating *"a permission check passed"* with *"the
+delegation being tested is what caused it to pass"* — the test had no way to distinguish
+the two, so it could not fail for the right reason either.
+
+**Resolution:**
+Re-ran the test against **`mgarcia`** — a different member of `IT-Admins`, sitting in the
+same excluded `IT/Admins` OU. One account acting on a *different* account is the only
+version of this test that exercises OU-level delegation rather than self-service rights.
+
+---
+
+### Issue 32 — A pasted multi-line script was silently swallowed into a single masked password prompt
+
+**What happened:**
+After switching to the explicit `-Credential` approach, a multi-line block of PowerShell —
+building the credential object, then two `Set-ADAccountPassword` calls — was pasted into
+the console in one go. The first line triggered the `Read-Host -AsSecureString` prompt, and
+from that moment the console stopped treating the newlines in the rest of the paste as
+separate command submissions. Every remaining character, including entire subsequent lines
+of code, was absorbed as literal masked input into that one password variable, showing up
+as an abnormally long run of asterisks. None of the other pasted lines had executed as
+commands at all.
+
+**Root cause:**
+Once a masked/secure-string prompt is reading, PowerShell console input does not reliably
+treat embedded newlines from a paste as *Enter* the way an unmasked prompt does. The paste
+looked like it ran; it was being eaten.
+
+**Resolution:**
+Cancelled the pending input with `Ctrl+C` before submitting the corrupted value, then re-ran
+the remaining commands **one line at a time**. Adopted as general practice for the rest of
+this project: never paste a multi-line block when an interactive prompt like `Read-Host` is
+part of it.
+
+**Status: RESOLVED.**
+
+---
+
 ## Current configuration state
 
 | Setting | Value | Status |

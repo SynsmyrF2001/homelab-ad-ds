@@ -33,6 +33,52 @@ TEMPLATE — copy this block, fill it in, and paste it directly beneath the
 
 ---
 
+## 2026-09-04
+
+**Delegation of control, and proof that the boundary holds.** `IT-Admins` now has
+OU-scoped administrative rights over the departmental OUs — and demonstrably *cannot*
+touch the admin OU that was deliberately left out. Reaching a clean result took working
+through four real issues, all now written up in the troubleshooting log.
+
+### Added
+- **OU-scoped delegation of control to `IT-Admins`**, granted through the Delegation of
+  Control Wizard: *Create, delete, and manage user accounts* over the `HR`, `Finance`,
+  `Contractors`, and `IT/Helpdesk` OUs. **`IT/Admins` was excluded on purpose** — a
+  helpdesk-tier grant that could manage higher-privileged admin accounts is a
+  privilege-escalation path, not a convenience.
+
+### Verified
+- **The delegation boundary is enforced, not just configured**, confirmed with a real
+  allow/deny test pair run as `jsmith` (a member of `IT-Admins`) via an explicit
+  `-Credential` object:
+  - **Allow** — password reset against `edavis`, in the delegated `HR` OU: **succeeded**.
+  - **Deny** — the identical reset against `mgarcia`, in the excluded `IT/Admins` OU:
+    **failed** with `UnauthorizedAccessException: Access is denied`.
+
+### Fixed
+- Four issues stood between the delegation being configured and being *trustworthily*
+  verified — see [`docs/troubleshooting-log.md`](docs/troubleshooting-log.md),
+  Issues 29–32:
+  - **RSAT never actually installed on the client** (Issue 29). `Add-WindowsCapability`
+    reported success while the capability's real state was `NotPresent` with a 0-byte
+    download — the Feature-on-Demand package is not published for this ARM64 Insider
+    build. Verification moved to DC01, which has the tooling natively.
+  - **`runas /netonly` silently never took effect** (Issue 30). The shell kept running as
+    Administrator, so an excluded-OU reset "passed" — a false result that invalidated a
+    whole round of testing. Replaced with a per-cmdlet `-Credential` object.
+  - **A self-referential test proved nothing** (Issue 31). `jsmith` resetting `jsmith`'s
+    own password exercises the built-in `SELF` *Change Password* right, not the OU
+    delegation. Re-run against a different account in the excluded OU.
+  - **A multi-line paste was swallowed by a masked prompt** (Issue 32). Once
+    `Read-Host -AsSecureString` was reading, the rest of the pasted script was absorbed as
+    literal password input and never ran. Interactive prompts now get one line at a time.
+
+### Changed
+- `README.md` — delegation of control added to *Milestones Completed*, including the
+  excluded OU and the allow/deny verification result.
+
+---
+
 ## 2026-09-03
 
 **Both remaining open items are done.** The Screen Lock and USB Block GPOs are confirmed
