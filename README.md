@@ -103,6 +103,15 @@ users, groups, and Group Policy.
 - [x] **AD user lifecycle operations practiced** on the two fixture accounts:
   - **`sjohnson`** — password reset with `Set-ADAccountPassword -Reset` (the administrative reset path, which requires no knowledge of the old password), flagged for a mandatory change at next logon with `-ChangePasswordAtLogon $true`, then re-enabled with `Enable-ADAccount`
   - **`kpark`** — moved into a newly created **`Disabled Accounts`** OU and confirmed disabled with `Disable-ADAccount`, simulating an offboarding/archival workflow
+- [x] **OU-scoped administrative control delegated to `IT-Admins`** through the Delegation
+  of Control Wizard — *Create, delete, and manage user accounts* over the `HR`, `Finance`,
+  `Contractors`, and `IT/Helpdesk` OUs, **deliberately excluding `IT/Admins`** so that a
+  helpdesk-tier grant can never reach the accounts of higher-privileged admins. Verified
+  end to end using an explicit `-Credential` object for `jsmith` (a member of `IT-Admins`):
+  a password reset against `edavis`, in the delegated `HR` OU, **succeeded**, while an
+  identical reset against `mgarcia`, in the excluded `IT/Admins` OU, **failed** with
+  `UnauthorizedAccessException: Access is denied` — proving the delegation boundary is
+  actually enforced, not merely present
 
 > **Note on the client hostname.** `WIN-NSHG0FCOL9Q` is the name Windows generated
 > automatically during installation — it is the machine's real hostname, not a chosen
