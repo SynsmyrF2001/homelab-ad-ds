@@ -3,7 +3,7 @@
 **Project:** Windows Server AD DS homelab on Apple Silicon MacBook Pro
 **Environment:** UTM (x86 emulation) on M-series Mac
 **Date:** August–September 2026
-**Status:** Core build complete — domain controller promoted with OUs, users, groups and GPOs in place; client `WIN-NSHG0FCOL9Q` joined to `corp.local` with GPOs verified; user lifecycle and delegation of control done. Open: the DC's computer account is in the wrong container (Issue 33).
+**Status:** Core build complete — domain controller promoted with OUs, users, groups and GPOs in place; client `WIN-NSHG0FCOL9Q` joined to `corp.local` with GPOs verified; user lifecycle and delegation of control done. Open: `dcdiag` SystemLog failures under review (Issue 33).
 
 > For the authoritative current-state summary (VM specs, network settings, domain
 > details, milestone checklist), see [`../README.md`](../README.md). This document is
@@ -364,7 +364,7 @@ Re-ran the same command with the correct cmdlet name, which completed normally. 
 
 ---
 
-## Issue log — Step 5: Windows 11 ARM64 client (WIN11-CLIENT01)
+## Issue log — Step 5: Windows 11 ARM64 client (WIN-NSHG0FCOL9Q)
 
 The entries below cover the client VM build. Unlike DC01, this VM uses UTM's
 **Virtualize** mode rather than Emulate, since Windows 11 is available as a native
@@ -989,10 +989,10 @@ outstanding work.
 >
 > The original entry says the cleanup attempts were made "regardless of the object's
 > location", which suggests the object was moved. On 2026-09-30 the DC's account was
-> found in `CN=Computers` instead of `OU=Domain Controllers` (Issue 33). This entry is
-> the most likely source of that move, but that has not been confirmed.
+> found in `CN=Computers` instead of `OU=Domain Controllers` (Issue 33, since fixed). This
+> entry is a possible source of that move, but how the object got there was not determined.
 >
-> **Revised status: CLOSED — misdiagnosed; no orphan exists. Follow-up in Issue 33.**
+> **Revised status: CLOSED — misdiagnosed; no orphan exists. Follow-up in Issues 33 and 34.**
 
 **What I learned:**
 - **Check what an object *is* before deciding it is dead.** `Get-ADDomainController` and
@@ -1171,29 +1171,97 @@ part of it.
 ### Issue 33 — Domain controller's computer account found in `CN=Computers`, failing `dcdiag`
 
 **What happened:**
-A state check on 2026-09-30 found the domain controller's computer account,
-`WIN11-CLIENT01`, in the default `CN=Computers,DC=corp,DC=local` container instead of
-`OU=Domain Controllers`. As a result:
+On 2026-09-30, `dcdiag /q` reported:
 
-- `dcdiag /test:machineaccount` fails.
-- The **Default Domain Controllers Policy**, which is linked to `OU=Domain Controllers`,
-  does not apply to the DC.
+```
+The current DC is not in the domain controller's OU
+```
 
-A separate `dcdiag` failure was found at the same time: the **SystemLog** test fails on
-recent error events, including an unclean shutdown and an Azure Arc Proxy service
-timeout (compare Issue 7).
+and the **MachineAccount** test failed.
+
+**How it was caught:**
+First confirmed the machine really was the DC: `DomainRole` 5 (primary domain
+controller), and it holds the PDC emulator role. Then listed every computer object with
+`Get-ADComputer`:
+
+- The DC's account, `WIN11-CLIENT01`, was in the default `CN=Computers,DC=corp,DC=local`
+  container.
+- The Windows 11 client, `WIN-NSHG0FCOL9Q`, was in `OU=Contractors`, as expected.
+- No `DC01` object existed anywhere (see Issue 34).
 
 **Root cause:**
-Not confirmed. The most likely cause is the cleanup attempts in Issue 28, which treated
-this account as an orphan and record trying to delete it "regardless of the object's
-location".
+The DC's computer object was outside `OU=Domain Controllers`, which is where the
+**Default Domain Controllers Policy** is linked, so the policy was not applying to the DC.
+How the object got there was not determined. The Issue 28 cleanup attempts are one
+possible cause, but this has not been confirmed.
 
 **Resolution:**
-In progress. Planned: move the account back into `OU=Domain Controllers`, confirm with
-`Get-ADComputer`, run `gpupdate /force`, then re-run `dcdiag /test:machineaccount`.
-Review the SystemLog events separately.
+Moved the object back with `Move-ADObject` into `OU=Domain Controllers`. Verified in three
+ways:
 
-**Status: OPEN.**
+- The object's Distinguished Name now sits under `OU=Domain Controllers`.
+- `gpresult` lists the Default Domain Controllers Policy.
+- `dcdiag /test:machineaccount` passes.
+
+**Prevention:**
+Add the MachineAccount check (`dcdiag /test:machineaccount`) to the post-promotion
+checklist.
+
+**Status: RESOLVED.**
+
+> The `dcdiag` **SystemLog** test failure found during the same check is a separate
+> problem and is still under review. It fails on recent error events, including an
+> unclean shutdown and an Azure Arc Proxy service timeout (compare Issue 7).
+
+---
+
+### Issue 34 — Documented hostname (`DC01`) did not match the real one (`WIN11-CLIENT01`)
+
+**What happened:**
+`$env:COMPUTERNAME` and `Get-ADDomainController` both returned `WIN11-CLIENT01`, while the
+README called the domain controller `DC01`.
+
+**Root cause:**
+The "renamed to DC01" milestone was recorded without verifying the hostname (see the
+Issue 8 correction). The DC's NTDS Settings object in the Configuration partition sits
+under `WIN11-CLIENT01`, which means the DC was promoted under that name.
+
+**Resolution:**
+Corrected the README. The DC itself was left as it is: renaming a domain controller is
+risky and has no payoff in this lab.
+
+**Prevention:**
+Verify the hostname with a command before checking a milestone off.
+
+**Status: RESOLVED (documentation corrected; DC not renamed, by design).**
+
+---
+
+### Issue 35 — `Start-Transcript` recorded no output from native commands
+
+**What happened:**
+The saved transcript showed blank output for `hostname`, `dcdiag /q` and `w32tm`, while
+output from PowerShell cmdlets was present. A blank `dcdiag /q` therefore looked like a
+healthy result.
+
+**Root cause (most likely; mechanism not isolated):**
+Native executables write directly to the console instead of through the PowerShell
+pipeline that the transcript records.
+
+**Resolution:**
+Ran the commands inside a script block with every stream redirected into the pipeline:
+
+```powershell
+& { ... } *>&1 | Out-File
+```
+
+The resulting file contained the `netdom` and verbose `dcdiag` output.
+
+**Prevention:**
+Never read a blank line in a transcript as "healthy". Capture native commands through the
+pipeline.
+
+**Status: RESOLVED (workaround in place).**
 
 ---
 
@@ -1213,7 +1281,7 @@ Last verified against the live domain on 2026-09-30.
 | ISO boot loop | Fixed | Confirmed |
 | AD DS role | Installed | Confirmed |
 | Domain controller promotion | `corp.local` forest, NetBIOS `CORP`; sole DC holds all FSMO roles | Confirmed via `Get-ADDomain` / `Get-ADDomainController` |
-| DC computer account | `CN=Computers` (should be `OU=Domain Controllers`) | **Open** — Issue 33 |
+| DC computer account | `OU=Domain Controllers` | Fixed 2026-09-30 — `dcdiag /test:machineaccount` passes (Issue 33) |
 | OU structure | IT (Admins, Helpdesk), HR, Finance, Contractors, Disabled Accounts | Created |
 | Security groups | `IT-Admins`, `HR-Staff`, `VPN-Users` | Confirmed via `Get-ADGroupMember` |
 | User accounts | 15 total: 3 built-in, the original 10, plus `amartinez` and `jlee2`; `kpark` disabled | Confirmed 2026-09-30 |
@@ -1242,8 +1310,9 @@ Last verified against the live domain on 2026-09-30.
 11. ~~Verify GPOs applying with `gpresult /r` on the client~~ — done after moving the client into `OU=Contractors`
 12. ~~Practice AD user lifecycle operations~~ — done (`sjohnson`, `kpark`)
 13. ~~Delegate OU-scoped control to `IT-Admins`~~ — done and verified (Issues 29–32)
-14. **Move the DC's computer account back into `OU=Domain Controllers` and re-run `dcdiag`** (Issue 33)
-15. Review the `dcdiag` SystemLog failures (Issue 33)
+14. ~~Move the DC's computer account back into `OU=Domain Controllers` and re-run `dcdiag`~~ — done, MachineAccount test passes (Issue 33)
+15. **Review the `dcdiag` SystemLog failures** (Issue 33)
+16. Add `dcdiag /test:machineaccount` to the post-promotion checklist (Issue 33)
 
 ---
 

@@ -9,7 +9,9 @@ the headings that apply to a given day.
 - **Added** — new infrastructure, objects, scripts, or documentation
 - **Changed** — reconfiguration of something that already existed
 - **Fixed** — problems resolved (cross-reference [`docs/troubleshooting-log.md`](docs/troubleshooting-log.md))
+- **Corrected** — documentation that was wrong about the lab's real state
 - **Verified** — checks run to confirm a milestone actually works
+- **Open** — problems found but not yet resolved
 - **Security** — credential handling and anything affecting what is safe to publish
 
 <!--
@@ -38,32 +40,41 @@ TEMPLATE — copy this block, fill it in, and paste it directly beneath the
 **The documentation was checked against the live domain, and it was wrong about the
 domain controller's name.** The controller is `WIN11-CLIENT01`. `DC01` is only the UTM
 VM name. That also overturns the Issue 28 diagnosis: the "orphaned" DC-flagged object
-was the live controller all along.
+was the live controller all along. The same check found the DC's computer account in the
+wrong container, which is now fixed.
+
+### Corrected
+- README: the DC's Windows hostname is `WIN11-CLIENT01` (`DC01` is the UTM VM name);
+  removed the incorrect "renamed to DC01" milestone and added a *Naming* section
+- README: DC's DNS client is `127.0.0.1`; OS build number (10.0.29641), user count and
+  Windows 11 client status updated; *Known Issues* and *Verified State* sections added
+- Troubleshooting log: naming note at the top, and corrections to Issue 8 (the `DC01`
+  rename never persisted) and Issue 28 (the "orphan" was the live DC)
+
+### Fixed
+- DC computer account moved from `CN=Computers` to `OU=Domain Controllers`;
+  `dcdiag /test:machineaccount` now passes — see
+  [`docs/troubleshooting-log.md`](docs/troubleshooting-log.md), Issue 33
+
+### Changed
+- VM timezone set from Pacific to Eastern (clock offset vs `time.windows.com` measured at 0.69 s)
+
+### Added
+- Troubleshooting log Issues 33–35: the misplaced DC account, the `DC01`/`WIN11-CLIENT01`
+  hostname mismatch, and `Start-Transcript` recording no output from native commands
 
 ### Verified
 - Live state of the domain checked with PowerShell on the controller:
   - Windows hostname is `WIN11-CLIENT01`, and there is no `DC01` object in AD.
   - It is the only DC, it holds all FSMO roles, and the domain functional level is
     `Windows2028Domain`.
-  - The controller's DNS client is set to `127.0.0.1`.
   - There are 2 computer accounts (the DC and `WIN-NSHG0FCOL9Q` in `OU=Contractors`)
     and 15 user accounts (3 built-in, the original 10, plus `amartinez` and `jlee2`).
     `kpark` is disabled and `sjohnson` is enabled.
 
-### Fixed
-- `README.md` — controller hostname corrected throughout, with a new *Naming* section.
-  Also corrected: the DNS setting, the OS build number (10.0.29641) and the user count.
-  Removed the false "Server renamed to DC01" milestone. Added *Known Issues* and
-  *Verified State* sections.
-- `docs/troubleshooting-log.md` — added a naming note at the top and corrections to
-  Issue 8 (the `DC01` rename never persisted) and Issue 28 (the "orphan" was the live
-  DC). Refreshed the *Current configuration state* and *Next steps* sections.
-
-### Added
-- Issue 33, **open**: the DC's computer account is in `CN=Computers` instead of
-  `OU=Domain Controllers`. As a result, `dcdiag /test:machineaccount` fails and the
-  Default Domain Controllers Policy does not apply. The `dcdiag` SystemLog test also
-  fails on recent error events.
+### Open
+- `dcdiag` SystemLog test still reports recent error events (unclean shutdown, Azure Arc
+  Proxy timeout)
 
 ---
 

@@ -144,16 +144,13 @@ multi-step operation (DNS records, service principal names) with no benefit for 
 
 ## Known Issues
 
-- **Domain controller's computer account is in the wrong container.** It sits in the default
-  `CN=Computers` container instead of `OU=Domain Controllers`, so `dcdiag /test:machineaccount`
-  fails and the Default Domain Controllers Policy is not applying to it. Found 2026-09-30;
-  fix in progress ([Issue 33](docs/troubleshooting-log.md)).
 - **`dcdiag` SystemLog test fails** on recent error events (an unclean shutdown, an Azure Arc
   Proxy service timeout, and others). Under review.
 
 ## In Progress / Next Steps
 
-- [ ] Move the domain controller's computer account into `OU=Domain Controllers` and re-run `dcdiag`
+- [ ] Review the `dcdiag` SystemLog errors (see Known Issues)
+- [ ] Add `dcdiag /test:machineaccount` to the post-promotion checklist
 - [ ] Confirm the screen lock and USB restrictions actually take effect on the client, beyond
   `gpresult /r` listing them as applied
 - [ ] Extend to Azure and Microsoft Entra ID — tracked in a separate repo, `hybrid-identity-lab` (link once published)
@@ -170,7 +167,8 @@ Checked with PowerShell on the domain controller.
 | Domain controllers in the domain | 1 (`WIN11-CLIENT01.corp.local`, 192.168.64.10) |
 | Domain functional level | Windows2028Domain |
 | FSMO roles (schema, domain naming, PDC) | All on `WIN11-CLIENT01.corp.local` |
-| DC computer account location | `CN=Computers,DC=corp,DC=local` (expected `OU=Domain Controllers`; see Known Issues) |
+| DC computer account location | `OU=Domain Controllers` — moved from `CN=Computers` on 2026-09-30; `dcdiag /test:machineaccount` passes ([Issue 33](docs/troubleshooting-log.md)) |
+| Time zone | Eastern (changed from Pacific); clock offset vs `time.windows.com` 0.69 s |
 | Computer accounts in AD | 2: the DC, and `WIN-NSHG0FCOL9Q` (Windows 11 Pro, `OU=Contractors`) |
 | User accounts | 15 total: 3 built-in, the original 10, plus `amartinez` and `jlee2` |
 | Disabled non-built-in users | `kpark` (`sjohnson` was re-enabled during lifecycle practice) |
