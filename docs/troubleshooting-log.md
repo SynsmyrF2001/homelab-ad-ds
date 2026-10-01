@@ -2,12 +2,18 @@
 
 **Project:** Windows Server AD DS homelab on Apple Silicon MacBook Pro
 **Environment:** UTM (x86 emulation) on M-series Mac
-**Date:** August 2026
-**Status:** Core build complete — DC01 promoted with OUs, users, groups and GPOs in place, and `WIN11-CLIENT01` joined to `corp.local` and verified end to end (Issue 27). Remaining: confirm the Screen Lock and USB Block GPOs apply on the client, and practise AD user lifecycle operations.
+**Date:** August–September 2026
+**Status:** Core build complete — domain controller promoted with OUs, users, groups and GPOs in place; client `WIN-NSHG0FCOL9Q` joined to `corp.local` with GPOs verified; user lifecycle and delegation of control done. Open: the DC's computer account is in the wrong container (Issue 33).
 
 > For the authoritative current-state summary (VM specs, network settings, domain
 > details, milestone checklist), see [`../README.md`](../README.md). This document is
 > the chronological record of *problems encountered and how they were fixed*.
+
+> **Naming correction (verified 2026-09-30).** Entries in this log call the domain
+> controller `DC01`. That is the **UTM VM name** only. The controller's Windows hostname
+> and AD computer account are `WIN11-CLIENT01` (`WIN11-CLIENT01.corp.local`); there is no
+> `DC01` object in AD. Historical entries are left as written; read `DC01` as "the domain
+> controller". See Issue 8 and Issue 28 for the corrections this affects.
 
 ---
 
@@ -28,7 +34,7 @@ This document captures every issue encountered during setup, how each was diagno
 | DC01 OS | Windows Server VNext Preview (x86_64) |
 | DC01 IP | 192.168.64.10 (static) |
 | Gateway | 192.168.64.1 (UTM Shared Network) |
-| DNS | 192.168.64.10 (self) |
+| DNS (on the DC) | 127.0.0.1 (self) |
 | Domain | corp.local |
 | DC01 RAM | 4 GB |
 | DC01 CPU | 2 cores |
@@ -217,6 +223,11 @@ The real issue was that the ISO was still mounted (Issue 6), which caused subseq
 - Windows Server applies hostname changes during a specialized restart phase that looks like setup but isn't.
 - The distinction between "OOBE configuration" and "fresh installation" is important — OOBE runs from the existing Windows installation, not from the ISO.
 - Renaming a computer is a common sysadmin task and always requires a restart to propagate the change through the OS and network stack.
+
+> **Correction (2026-09-30):** this rename did not persist. Live checks show the domain
+> controller's hostname is `WIN11-CLIENT01`, not `DC01`, and AD holds no `DC01` computer
+> object. The lesson stands, with one addition: confirm a rename with `hostname` after the
+> reboot rather than assuming it applied.
 
 ---
 
@@ -963,7 +974,31 @@ outstanding work.
 
 **Status: ACCEPTED, not resolved — by design.**
 
+> **Correction (2026-09-30): the "orphaned" object was the live domain controller.**
+> Checks run on 2026-09-30 show `WIN11-CLIENT01` is the Windows hostname and AD computer
+> account of the **only domain controller in `corp.local`**, the holder of every FSMO
+> role. It was never an orphan from an abandoned VM build. That explains why it was flagged
+> as a DC account and why `Remove-ADComputer` and ADUC refused to delete it: they were
+> protecting a live, healthy domain controller. The diagnosis above, and the statement
+> that the object "has no effect on DC01's FSMO roles", are wrong.
+>
+> What still holds: the client rename to `WIN11-CLIENT01` collided with an existing
+> account, and abandoning it was the right call, for a better reason than the one given.
+> Running `ntdsutil` metadata cleanup against this object would have removed the forest's
+> only DC from its own directory.
+>
+> The original entry says the cleanup attempts were made "regardless of the object's
+> location", which suggests the object was moved. On 2026-09-30 the DC's account was
+> found in `CN=Computers` instead of `OU=Domain Controllers` (Issue 33). This entry is
+> the most likely source of that move, but that has not been confirmed.
+>
+> **Revised status: CLOSED — misdiagnosed; no orphan exists. Follow-up in Issue 33.**
+
 **What I learned:**
+- **Check what an object *is* before deciding it is dead.** `Get-ADDomainController` and
+  the computer's own `hostname` would have identified this account as the running DC in
+  seconds. Its creation date and DC flag were read as evidence of an orphan when they
+  were evidence of the opposite.
 - **A domain-joined rename is two operations, not one.** Creating the AD account and
   switching the local machine identity are separate phases, and an interruption between
   them leaves the directory ahead of the machine — with the half-finished state blocking
@@ -1133,46 +1168,82 @@ part of it.
 
 ---
 
+### Issue 33 — Domain controller's computer account found in `CN=Computers`, failing `dcdiag`
+
+**What happened:**
+A state check on 2026-09-30 found the domain controller's computer account,
+`WIN11-CLIENT01`, in the default `CN=Computers,DC=corp,DC=local` container instead of
+`OU=Domain Controllers`. As a result:
+
+- `dcdiag /test:machineaccount` fails.
+- The **Default Domain Controllers Policy**, which is linked to `OU=Domain Controllers`,
+  does not apply to the DC.
+
+A separate `dcdiag` failure was found at the same time: the **SystemLog** test fails on
+recent error events, including an unclean shutdown and an Azure Arc Proxy service
+timeout (compare Issue 7).
+
+**Root cause:**
+Not confirmed. The most likely cause is the cleanup attempts in Issue 28, which treated
+this account as an orphan and record trying to delete it "regardless of the object's
+location".
+
+**Resolution:**
+In progress. Planned: move the account back into `OU=Domain Controllers`, confirm with
+`Get-ADComputer`, run `gpupdate /force`, then re-run `dcdiag /test:machineaccount`.
+Review the SystemLog events separately.
+
+**Status: OPEN.**
+
+---
+
 ## Current configuration state
+
+Last verified against the live domain on 2026-09-30.
 
 | Setting | Value | Status |
 |---------|-------|--------|
-| Hostname | DC01 | Confirmed |
+| Hostname | `WIN11-CLIENT01` (UTM VM name `DC01`) | Confirmed 2026-09-30; the Issue 8 rename to `DC01` did not persist |
 | IPv4 address | 192.168.64.10 | Configured |
 | Subnet mask | 255.255.255.0 | Configured |
 | Default gateway | 192.168.64.1 | Configured |
-| DNS server | 192.168.64.10 (self) | Configured |
+| DNS server | 127.0.0.1 (self) | Confirmed 2026-09-30 |
 | DHCP | Disabled | Confirmed |
 | UTM Guest Tools | Installed | Confirmed |
 | ISO boot loop | Fixed | Confirmed |
 | AD DS role | Installed | Confirmed |
-| Domain controller promotion | `corp.local` forest, NetBIOS `CORP` | Confirmed via `Get-ADDomain` / `Get-ADDomainController` |
-| OU structure | IT (Admins, Helpdesk), HR, Finance, Contractors | Created |
+| Domain controller promotion | `corp.local` forest, NetBIOS `CORP`; sole DC holds all FSMO roles | Confirmed via `Get-ADDomain` / `Get-ADDomainController` |
+| DC computer account | `CN=Computers` (should be `OU=Domain Controllers`) | **Open** — Issue 33 |
+| OU structure | IT (Admins, Helpdesk), HR, Finance, Contractors, Disabled Accounts | Created |
 | Security groups | `IT-Admins`, `HR-Staff`, `VPN-Users` | Confirmed via `Get-ADGroupMember` |
-| User accounts | 10 across the five OUs (`sjohnson`, `kpark` disabled by design) | Confirmed via `Get-ADUser` |
-| GPOs | Password Policy (domain root), Screen Lock (IT/HR/Finance/Contractors), USB Block (Contractors) | Linked; confirmed on DC01 via `gpresult /r` |
-| Windows 11 ARM client VM | `WIN11-CLIENT01` — UTM Virtualize mode, ARM64, NIC `virtio-net-pci` | Rebuilt from scratch; installed and booting from disk |
+| User accounts | 15 total: 3 built-in, the original 10, plus `amartinez` and `jlee2`; `kpark` disabled | Confirmed 2026-09-30 |
+| GPOs | Password Policy (domain root), Screen Lock (IT/HR/Finance/Contractors), USB Block (Contractors) | Linked; confirmed on the DC and the client via `gpresult /r` |
+| Windows 11 ARM client VM | `WIN-NSHG0FCOL9Q` — Windows 11 Pro, UTM Virtualize mode, ARM64, NIC `virtio-net-pci` | Working; rename to `WIN11-CLIENT01` abandoned (Issue 28) |
 | Client network adapter | Red Hat VirtIO Ethernet Adapter | Confirmed working — DHCP IPv4 `192.168.64.4`, gateway and DNS present |
-| Client DNS configuration | `192.168.64.10` (DC01); IPv6 disabled on the adapter | Confirmed — `nslookup corp.local` resolves against DC01 |
-| Domain join | `WIN11-CLIENT01` joined to `corp.local` | Confirmed — `whoami` = `corp\administrator`, `.Domain` = `corp.local`, `.PartOfDomain` = `True` |
-| Client GPO application | Screen Lock and USB Block not yet checked on the client | Pending — `gpresult /r` on `WIN11-CLIENT01` |
+| Client DNS configuration | `192.168.64.10` (the DC); IPv6 disabled on the adapter | Confirmed — `nslookup corp.local` resolves against the DC |
+| Domain join | `WIN-NSHG0FCOL9Q` joined to `corp.local`, computer object in `OU=Contractors` | Confirmed — `whoami` = `corp\administrator`, `.Domain` = `corp.local`, `.PartOfDomain` = `True` |
+| User lifecycle practice | `sjohnson` reset and re-enabled; `kpark` disabled and moved to `Disabled Accounts` | Done |
+| Delegation of control | `IT-Admins` over HR, Finance, Contractors, IT/Helpdesk (not IT/Admins) | Verified with allow/deny test (Issues 29–32) |
 
 ---
 
 ## Next steps
 
-1. ~~Boot DC01 and confirm hostname shows `DC01`~~ — done
+1. ~~Boot the DC and confirm hostname~~ — done, but the hostname is `WIN11-CLIENT01`, not `DC01` (see Issue 8 correction)
 2. ~~Install AD DS role~~ — done
 3. ~~Promote to domain controller (create new forest `corp.local`)~~ — done
 4. ~~Build OU structure: IT, HR, Finance, Contractors~~ — done (see [`../scripts/new-ou-structure.ps1`](../scripts/new-ou-structure.ps1))
 5. ~~Create 10+ user accounts and security groups (`IT-Admins`, `HR-Staff`, `VPN-Users`)~~ — done (see [`../scripts/new-users-and-groups.ps1`](../scripts/new-users-and-groups.ps1))
-6. ~~Configure 3 GPOs (password policy, screen lock, USB restriction on Contractors OU)~~ — done, verified on DC01
-7. ~~Create Windows 11 ARM client VM~~ — rebuilt from scratch as `WIN11-CLIENT01` with `virtio-net-pci` set before install
+6. ~~Configure 3 GPOs (password policy, screen lock, USB restriction on Contractors OU)~~ — done, verified on the DC
+7. ~~Create Windows 11 ARM client VM~~ — rebuilt from scratch with `virtio-net-pci` set before install
 8. ~~Install the client's network adapter driver~~ — done, Red Hat VirtIO Ethernet Adapter bound automatically (Issue 24)
-9. ~~Configure client DNS to point at DC01 (`192.168.64.10`)~~ — done; required disabling IPv6 on the adapter (Issue 25)
-10. ~~Join `WIN11-CLIENT01` to `corp.local` and verify domain login~~ — done and verified end to end (Issue 27)
-11. **Verify GPOs applying with `gpresult /r` on the client** — next step; the Screen Lock and USB Block policies target workstations and have only been confirmed on DC01 so far
-12. Practice AD user lifecycle operations: password reset, disable/enable, move between OUs
+9. ~~Configure client DNS to point at the DC (`192.168.64.10`)~~ — done; required disabling IPv6 on the adapter (Issue 25)
+10. ~~Join the client to `corp.local` and verify domain login~~ — done and verified end to end (Issue 27)
+11. ~~Verify GPOs applying with `gpresult /r` on the client~~ — done after moving the client into `OU=Contractors`
+12. ~~Practice AD user lifecycle operations~~ — done (`sjohnson`, `kpark`)
+13. ~~Delegate OU-scoped control to `IT-Admins`~~ — done and verified (Issues 29–32)
+14. **Move the DC's computer account back into `OU=Domain Controllers` and re-run `dcdiag`** (Issue 33)
+15. Review the `dcdiag` SystemLog failures (Issue 33)
 
 ---
 
